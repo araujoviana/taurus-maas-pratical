@@ -1,0 +1,16 @@
+[Unit]
+Description=TaurusDB + MaaS AI Demo
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/taurus-demo
+EnvironmentFile=/opt/taurus-demo/.env
+ExecStart=/root/.local/bin/uv run uvicorn dashboard.main:app --host 127.0.0.1 --port 8000 --workers 2
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

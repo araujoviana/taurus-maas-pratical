@@ -1,0 +1,150 @@
+---
+# TaurusDB + MaaS AI Fintech Demo — Ansible Playbook
+
+# ─────────────────────────────────────────────
+# Play 1: System Setup
+# ─────────────────────────────────────────────
+- name: System Setup
+  hosts: demo_runner
+  become: yes
+
+  tasks:
+    - name: Update apt cache and upgrade
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Install system packages
+      apt:
+        name:
+          - python3-pip
+          - python3-venv
+          - python3-dev
+          - build-essential
+          - nginx
+          - default-mysql-client
+          - curl
+          - git
+          - apache2-utils
+        state: present
+
+    - name: Install uv (Python package manager)
+      shell: curl -LsSf https://astral.sh/uv/install.sh | sh
+      args:
+        executable: /bin/bash
+        creates: /root/.local/bin/uv
+      environment:
+        HOME: /root
+
+    - name: Ensure /opt/taurus-demo directory exists
+      file:
+        path: /opt/taurus-demo
+        state: directory
+        owner: root
+        mode: '0755'
+
+# ─────────────────────────────────────────────
+# Play 2: App Deploy
+# ─────────────────────────────────────────────
+- name: App Deploy
+  hosts: demo_runner
+  become: yes
+
+  tasks:
+    - name: Sync project files to /opt/taurus-demo/
+      synchronize:
+        src: /mnt/storage/Projetos/python-projs/taurus-maas-pratical/
+        dest: /opt/taurus-demo/
+        rsync_opts:
+          - "--exclude=.venv"
+          - "--exclude=.git"
+          - "--exclude=__pycache__"
+          - "--exclude=*.pyc"
+          - "--exclude=terraform/.terraform"
+          - "--exclude=terraform/terraform.tfstate*"
+
+    - name: Upload .env file
+      copy:
+        src: /mnt/storage/Projetos/python-projs/taurus-maas-pratical/.env
+        dest: /opt/taurus-demo/.env
+        mode: '0600'
+
+    - name: Install Python dependencies
+      shell: cd /opt/taurus-demo && /root/.local/bin/uv sync --no-dev
+      args:
+        executable: /bin/bash
+
+    - name: Seed the database
+      shell: cd /opt/taurus-demo && /root/.local/bin/uv run python scripts/seed_data.py
+      args:
+        executable: /bin/bash
+      timeout: 300
+      ignore_errors: yes
+
+    - name: Read DEMO_PASSWORD from .env
+      shell: grep '^DEMO_PASSWORD=' /opt/taurus-demo/.env | cut -d= -f2-
+      register: demo_pw
+      no_log: true
+
+    - name: Configure nginx htpasswd (password via stdin — not exposed in process list)
+      shell: printf '%s\n' "$HTPASSWD_PW" | htpasswd -i -c /etc/nginx/.htpasswd admin
+      args:
+        executable: /bin/bash
+      environment:
+        HTPASSWD_PW: "{{ demo_pw.stdout }}"
+      no_log: true
+
+    - name: Install systemd service
+      template:
+        src: templates/taurus-demo.service.j2
+        dest: /etc/systemd/system/taurus-demo.service
+
+    - name: Install nginx config
+      template:
+        src: templates/nginx.conf.j2
+        dest: /etc/nginx/sites-available/taurus-demo
+
+    - name: Enable nginx site
+      file:
+        src: /etc/nginx/sites-available/taurus-demo
+        dest: /etc/nginx/sites-enabled/taurus-demo
+        state: link
+
+    - name: Remove default nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and start taurus-demo service
+      systemd:
+        name: taurus-demo
+        state: restarted
+        enabled: yes
+
+    - name: Reload nginx
+      service:
+        name: nginx
+        state: reloaded
+
+# ─────────────────────────────────────────────
+# Play 3: Verify
+# ─────────────────────────────────────────────
+- name: Verify
+  hosts: demo_runner
+  become: yes
+
+  tasks:
+    - name: Wait for app to be up
+      wait_for:
+        port: 8000
+        delay: 5
+        timeout: 60
+
+    - name: Check HTTP via nginx
+      uri:
+        url: http://localhost/
+        status_code: 401

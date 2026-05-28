@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TaurusDB + MaaS AI — Live Demo</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+</head>
+<body>
+  <header>
+    <h1>TaurusDB + MaaS AI Demo</h1>
+    <div class="status-bar">
+      <span><span class="status-dot" id="db-dot"></span>TaurusDB</span>
+      <span><span class="status-dot" id="maas-dot"></span>MaaS AI</span>
+      <span id="scenario-badge" style="font-size:0.8rem;color:var(--muted)">idle</span>
+      <button class="btn small" onclick="generateReport()">Generate Report</button>
+    </div>
+  </header>
+
+  <div class="commentary-ticker" id="commentary-ticker">
+    <span class="ticker-label">GLM-5.1</span>
+    <span class="ticker-text" id="ticker-text">Waiting for metrics...</span>
+  </div>
+
+  <main>
+    <!-- TaurusDB Metrics -->
+    <div class="card">
+      <h2>TaurusDB Metrics</h2>
+      <div class="metrics-grid">
+        <div class="metric">
+          <div class="value" id="taurus-qps">0</div>
+          <div class="label">QPS</div>
+        </div>
+        <div class="metric">
+          <div class="value" id="taurus-latency">0</div>
+          <div class="label">Latency (ms)</div>
+        </div>
+        <div class="metric">
+          <div class="value" id="taurus-conn">0</div>
+          <div class="label">Connections</div>
+        </div>
+      </div>
+      <div class="chart-container" id="taurus-chart"></div>
+    </div>
+
+    <!-- MaaS AI Metrics -->
+    <div class="card">
+      <h2>MaaS AI Metrics</h2>
+      <div class="metrics-grid">
+        <div class="metric">
+          <div class="value" id="maas-latency">0</div>
+          <div class="label">Latency (ms)</div>
+        </div>
+        <div class="metric">
+          <div class="value" id="maas-model">—</div>
+          <div class="label">Model</div>
+        </div>
+        <div class="metric">
+          <div class="value" id="maas-err">0</div>
+          <div class="label">Errors</div>
+        </div>
+      </div>
+      <div class="chart-container" id="maas-chart"></div>
+    </div>
+
+    <!-- Scenario Controls -->
+    <div class="card full">
+      <h2>Scenario Controls</h2>
+      <div class="actions">
+        <button class="btn primary" onclick="startLoad()">Act 1 — Start Load</button>
+        <button class="btn danger" onclick="killPrimary()">Act 2 — Kill Primary</button>
+        <button class="btn" onclick="aiAnalyze()">Act 3 — AI Fraud Analysis</button>
+        <button class="btn" onclick="resetScenario()">Reset</button>
+      </div>
+      <h3>Fraud Injection</h3>
+      <div class="actions">
+        <button class="btn warning" onclick="injectFraud('velocity')">Velocity Fraud</button>
+        <button class="btn warning" onclick="injectFraud('large_transfer')">Large Transfer</button>
+        <button class="btn warning" onclick="injectFraud('geo_anomaly')">Geo Anomaly</button>
+        <button class="btn accent2" onclick="runFraudAnalysis()">Run AI Detection</button>
+      </div>
+      <div class="scenario-status" id="scenario-msg">Ready</div>
+      <div class="progress-bar"><div class="fill" id="progress-fill" style="width:0%"></div></div>
+    </div>
+
+    <!-- Latency Chart -->
+    <div class="card full">
+      <h2>Latency Over Time</h2>
+      <div class="chart-container" id="latency-chart"></div>
+    </div>
+
+    <!-- Recent Transactions -->
+    <div class="card">
+      <h2>Recent Transactions</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Account</th><th>Amount</th><th>Type</th><th>Flagged</th></tr></thead>
+          <tbody id="tx-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Fraud Alerts Feed -->
+    <div class="card">
+      <h2>Fraud Alerts</h2>
+      <div class="alerts-feed" id="alerts-feed">
+        <div class="alerts-empty">No alerts yet. Inject fraud patterns to trigger detection.</div>
+      </div>
+    </div>
+
+    <!-- AI Analysis Result -->
+    <div class="card">
+      <h2>AI Analysis</h2>
+      <div class="ai-result" id="ai-result">No analysis yet. Click "Act 3 — AI Fraud Analysis" to start.</div>
+    </div>
+
+    <!-- AI Chat Panel -->
+    <div class="card full chat-panel">
+      <h2>AI Analyst <span class="chat-badge">GLM-5.1</span></h2>
+      <div class="chat-history" id="chat-history"></div>
+      <div class="chat-input-row">
+        <input type="text" id="chat-input" placeholder="Ask a question about your data..." onkeydown="if(event.key==='Enter')sendChat()">
+        <button class="btn accent2" onclick="sendChat()">Send</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Report Modal -->
+  <div class="modal-overlay" id="report-modal" onclick="if(event.target===this)closeReportModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Executive Report</h2>
+        <div>
+          <button class="btn small" onclick="window.print()">Print / PDF</button>
+          <button class="btn small" onclick="closeReportModal()">Close</button>
+        </div>
+      </div>
+      <div class="modal-body" id="report-body">
+        <div class="report-loading">Generating report...</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

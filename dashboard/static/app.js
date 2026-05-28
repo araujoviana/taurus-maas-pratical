@@ -1,0 +1,362 @@
+let _token = sessionStorage.getItem('demo_token') || '';
+
+async function ensureAuth() {
+  if (_token) return true;
+  const pw = prompt('Demo password:');
+  if (!pw) return false;
+  try {
+    const body = new URLSearchParams({ username: 'admin', password: pw });
+    const res = await fetch('/auth/login', { method: 'POST', body });
+    if (!res.ok) { alert('Wrong password'); return false; }
+    const { access_token } = await res.json();
+    _token = access_token;
+    sessionStorage.setItem('demo_token', _token);
+    return true;
+  } catch { return false; }
+}
+
+const MAX_POINTS = 120;
+const taurusLatency = [];
+const maasLatency = [];
+const taurusQps = [];
+const timestamps = [];
+
+let ws = null;
+let taurusChart, maasChart, latencyChart;
+let chatHistory = [];
+let chatChartInstance = null;
+
+function initCharts() {
+  const common = {
+    chart: { type: 'line', height: 180, animations: { enabled: false }, background: 'transparent' },
+    xaxis: { labels: { show: false }, axisTicks: { show: false }, axisBorder: { show: false } },
+    yaxis: { labels: { style: { colors: '#8b8fa3', fontSize: '11px' } } },
+    grid: { borderColor: '#2a2d3a', strokeDashArray: 3 },
+    stroke: { width: 2, curve: 'smooth' },
+    tooltip: { theme: 'dark' },
+    colors: ['#6c5ce7'],
+  };
+
+  taurusChart = new ApexCharts(document.getElementById('taurus-chart'), {
+    ...common,
+    series: [{ name: 'QPS', data: [] }],
+    yaxis: { ...common.yaxis, title: { text: 'QPS', style: { color: '#8b8fa3' } } },
+  });
+  taurusChart.render();
+
+  maasChart = new ApexCharts(document.getElementById('maas-chart'), {
+    ...common,
+    series: [{ name: 'Latency', data: [] }],
+    colors: ['#00cec9'],
+    yaxis: { ...common.yaxis, title: { text: 'ms', style: { color: '#8b8fa3' } } },
+  });
+  maasChart.render();
+
+  latencyChart = new ApexCharts(document.getElementById('latency-chart'), {
+    ...common,
+    chart: { ...common.chart, height: 220 },
+    series: [
+      { name: 'TaurusDB', data: [] },
+      { name: 'MaaS AI', data: [] },
+    ],
+    colors: ['#6c5ce7', '#00cec9'],
+    yaxis: { ...common.yaxis, title: { text: 'Latency (ms)', style: { color: '#8b8fa3' } } },
+    legend: { show: true, position: 'top', labels: { colors: '#8b8fa3' } },
+  });
+  latencyChart.render();
+}
+
+function push(arr, val) {
+  arr.push(val);
+  if (arr.length > MAX_POINTS) arr.shift();
+}
+
+function updateDashboard(data) {
+  const t = data.taurus || {};
+  const m = data.maas || {};
+  const s = data.scenario || {};
+
+  document.getElementById('db-dot').className = 'status-dot ' + (t.available ? 'ok' : 'err');
+  document.getElementById('maas-dot').className = 'status-dot ' + (m.available ? 'ok' : 'err');
+
+  document.getElementById('taurus-qps').textContent = t.qps || 0;
+  document.getElementById('taurus-latency').textContent = (t.latency_ms || 0).toFixed(1);
+  document.getElementById('taurus-conn').textContent = t.connected || 0;
+
+  document.getElementById('maas-latency').textContent = (m.latency_ms || 0).toFixed(1);
+  document.getElementById('maas-model').textContent = m.model || '—';
+  document.getElementById('maas-err').textContent = t.errors || 0;
+
+  document.getElementById('scenario-badge').textContent = s.state || 'idle';
+  document.getElementById('scenario-msg').textContent = s.message || 'Ready';
+  document.getElementById('progress-fill').style.width = (s.progress || 0) + '%';
+
+  if (data.commentary) {
+    document.getElementById('ticker-text').textContent = data.commentary;
+  }
+
+  push(taurusLatency, t.latency_ms || 0);
+  push(maasLatency, m.latency_ms || 0);
+  push(taurusQps, t.qps || 0);
+  push(timestamps, new Date().toLocaleTimeString());
+
+  taurusChart.updateSeries([{ data: [...taurusQps] }]);
+  maasChart.updateSeries([{ data: [...maasLatency] }]);
+  latencyChart.updateSeries([
+    { data: [...taurusLatency] },
+    { data: [...maasLatency] },
+  ]);
+}
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onmessage = (e) => {
+    try {
+      updateDashboard(JSON.parse(e.data));
+    } catch {}
+  };
+  ws.onclose = () => setTimeout(connectWS, 2000);
+  ws.onerror = () => ws.close();
+}
+
+async function api(path, method = 'POST', body = null) {
+  if (!await ensureAuth()) return null;
+  try {
+    const opts = {
+      method,
+      headers: { 'Authorization': `Bearer ${_token}` },
+    };
+    if (body) {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    const res = await fetch(path, opts);
+    if (res.status === 401) {
+      _token = '';
+      sessionStorage.removeItem('demo_token');
+      if (!await ensureAuth()) return null;
+      return api(path, method, body);
+    }
+    return await res.json();
+  } catch (e) {
+    console.error(e);
+    return null;
+  }
+}
+
+function startLoad() { api('/scenario/start-load'); }
+function killPrimary() { api('/scenario/kill-primary'); }
+async function aiAnalyze() {
+  const res = await api('/scenario/ai-analyze');
+  if (res && res.analysis) {
+    document.getElementById('ai-result').textContent = res.analysis;
+  } else if (res && res.error) {
+    document.getElementById('ai-result').textContent = 'Error: ' + res.error;
+  }
+}
+function resetScenario() { api('/scenario/reset'); }
+
+async function loadTransactions() {
+  try {
+    const res = await fetch('/transactions?limit=20');
+    const rows = await res.json();
+    const tbody = document.getElementById('tx-body');
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td>${r.id}</td>
+        <td>${r.account_id}</td>
+        <td>${parseFloat(r.amount).toFixed(2)}</td>
+        <td>${r.tx_type}</td>
+        <td class="${r.is_flagged ? 'flagged' : ''}">${r.is_flagged ? 'FLAGGED' : 'ok'}</td>
+      </tr>
+    `).join('');
+  } catch {}
+}
+
+async function injectFraud(pattern) {
+  const res = await api(`/fraud/inject/${pattern}`);
+  if (res) {
+    loadFraudAlerts();
+  }
+}
+
+async function runFraudAnalysis() {
+  const res = await api('/fraud/analyze');
+  if (res && res.summary) {
+    document.getElementById('ai-result').textContent = res.summary;
+  }
+  loadFraudAlerts();
+}
+
+async function loadFraudAlerts() {
+  try {
+    const res = await fetch('/fraud/alerts?limit=20');
+    const alerts = await res.json();
+    const feed = document.getElementById('alerts-feed');
+    if (!alerts.length || alerts.error) {
+      feed.innerHTML = '<div class="alerts-empty">No alerts yet. Inject fraud patterns to trigger detection.</div>';
+      return;
+    }
+    feed.innerHTML = alerts.map(a => {
+      const typeLabel = a.alert_type ? a.alert_type.toUpperCase().replace('_', ' ') : 'UNKNOWN';
+      const conf = a.confidence ? Math.round(a.confidence * 100) : 0;
+      const timeAgo = a.detected_at ? timeSince(new Date(a.detected_at)) : '';
+      return `
+        <div class="alert-card">
+          <div class="alert-header">
+            <span class="alert-type">${typeLabel}</span>
+            <span class="alert-conf">${conf}% confidence</span>
+          </div>
+          <div class="alert-body">
+            Account #${a.account_id || '?'} &middot; Txn #${a.transaction_id || '?'}
+          </div>
+          ${a.reasoning ? `<div class="alert-reason">${a.reasoning}</div>` : ''}
+          <div class="alert-time">${timeAgo}</div>
+        </div>
+      `;
+    }).join('');
+  } catch {}
+}
+
+function timeSince(date) {
+  const seconds = Math.floor((new Date() - date) / 1000);
+  if (seconds < 60) return seconds + 's ago';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + ' min ago';
+  const hours = Math.floor(minutes / 60);
+  return hours + 'h ago';
+}
+
+async function sendChat() {
+  const input = document.getElementById('chat-input');
+  const message = input.value.trim();
+  if (!message) return;
+  input.value = '';
+
+  const historyEl = document.getElementById('chat-history');
+  historyEl.innerHTML += `<div class="chat-msg user"><strong>You:</strong> ${escapeHtml(message)}</div>`;
+
+  chatHistory.push({ role: 'user', content: message });
+
+  const res = await api('/ai/chat', 'POST', { message, history: chatHistory });
+  if (!res) {
+    historyEl.innerHTML += `<div class="chat-msg ai"><strong>AI:</strong> Error communicating with AI</div>`;
+    return;
+  }
+
+  chatHistory.push({ role: 'assistant', content: res.text || '' });
+
+  let aiHtml = `<div class="chat-msg ai"><strong>AI:</strong> ${escapeHtml(res.text || '')}</div>`;
+  if (res.sql) {
+    aiHtml += `<div class="chat-sql"><details><summary>SQL Query</summary><code>${escapeHtml(res.sql)}</code></details></div>`;
+  }
+  historyEl.innerHTML += aiHtml;
+
+  if (res.chart) {
+    const chartId = 'chat-chart-' + Date.now();
+    historyEl.innerHTML += `<div class="chat-chart" id="${chartId}"></div>`;
+    renderChatChart(chartId, res.chart);
+  }
+
+  historyEl.scrollTop = historyEl.scrollHeight;
+}
+
+function renderChatChart(containerId, chart) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+
+  const type = chart.type || 'bar';
+  const opts = {
+    chart: { type, height: 250, background: 'transparent' },
+    title: { text: chart.title || '', style: { color: '#8b8fa3', fontSize: '14px' } },
+    xaxis: { categories: chart.categories || [] },
+    series: chart.series || [],
+    colors: type === 'line' ? ['#6c5ce7'] : ['#6c5ce7', '#00cec9', '#ff6b6b', '#fdcb6e', '#00b894'],
+    grid: { borderColor: '#2a2d3a', strokeDashArray: 3 },
+    tooltip: { theme: 'dark' },
+    theme: { mode: 'dark' },
+    plotOptions: {
+      bar: { borderRadius: 4 },
+      pie: { donut: { labels: { show: true } } },
+    },
+    legend: { labels: { colors: '#8b8fa3' } },
+  };
+
+  if (type === 'table') {
+    el.innerHTML = renderTable(chart);
+    return;
+  }
+
+  const instance = new ApexCharts(el, opts);
+  instance.render();
+}
+
+function renderTable(chart) {
+  if (!chart.series || !chart.series.length) return '';
+  const headers = chart.categories || [];
+  let html = '<div class="table-wrap"><table><thead><tr>';
+  headers.forEach(h => html += `<th>${h}</th>`);
+  html += '</tr></thead><tbody>';
+  chart.series[0].data.forEach((row, i) => {
+    html += '<tr>';
+    if (Array.isArray(row)) {
+      row.forEach(cell => html += `<td>${cell}</td>`);
+    } else {
+      html += `<td>${headers[i] || ''}</td><td>${row}</td>`;
+    }
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  return html;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+async function generateReport() {
+  const modal = document.getElementById('report-modal');
+  const body = document.getElementById('report-body');
+  modal.style.display = 'flex';
+  body.innerHTML = '<div class="report-loading">Generating report...</div>';
+
+  const res = await api('/ai/report', 'GET');
+  if (!res || res.error) {
+    body.innerHTML = '<div class="report-loading">Error generating report</div>';
+    return;
+  }
+
+  let html = `<div class="report-ts">Generated: ${new Date(res.generated_at * 1000).toLocaleString()}</div>`;
+  if (res.sections) {
+    res.sections.forEach(s => {
+      html += `<div class="report-section"><h3>${s.title}</h3><p>${s.content}</p></div>`;
+    });
+  }
+  body.innerHTML = html;
+}
+
+function closeReportModal() {
+  document.getElementById('report-modal').style.display = 'none';
+}
+
+async function fetchCommentary() {
+  try {
+    const res = await fetch('/ai/commentary');
+    const data = await res.json();
+    if (data.text) {
+      document.getElementById('ticker-text').textContent = data.text;
+    }
+  } catch {}
+}
+
+initCharts();
+connectWS();
+setInterval(loadTransactions, 5000);
+setInterval(loadFraudAlerts, 5000);
+setInterval(fetchCommentary, 30000);
+loadTransactions();
+loadFraudAlerts();
+setTimeout(fetchCommentary, 2000);

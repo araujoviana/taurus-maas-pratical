@@ -1,0 +1,27 @@
+# Secrets — never commit .env (use .env.example as the template)
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Terraform state (may contain sensitive outputs)
+terraform/.terraform/
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/.terraform.lock.hcl
+terraform/terraform.tfvars
+
+# Ansible generated
+ansible/inventory.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp

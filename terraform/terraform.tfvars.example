@@ -1,0 +1,19 @@
+# Copy this to terraform.tfvars and fill in the blanks.
+# terraform.tfvars is gitignored — never commit it.
+
+hw_access_key       = "<your-hw-access-key>"
+hw_secret_key       = "<your-hw-secret-key>"
+hw_region           = "ap-southeast-1"
+hw_project_id       = "<your-project-id>"
+
+# TaurusDB + nginx password (same as DEMO_PASSWORD in .env)
+taurus_password     = "YOUR_DEMO_PASSWORD"
+
+# Path to your SSH public key on this machine
+ssh_public_key_path = "~/.ssh/taurus_demo_key.pub"
+
+# Tune if needed
+availability_zone   = "ap-southeast-1a"
+availability_zone_2 = "ap-southeast-1b"
+ecs_flavor          = "c6.xlarge.2"
+taurus_flavor       = "gaussdb.mysql.x1.xlarge.4"
