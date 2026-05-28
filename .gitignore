@@ -25,3 +25,4 @@ ansible/inventory.ini
 .idea/
 .vscode/
 *.swp
+credentials.txt

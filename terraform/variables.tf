@@ -13,7 +13,7 @@ variable "hw_secret_key" {
 variable "hw_region" {
   description = "Huawei Cloud region"
   type        = string
-  default     = "ap-southeast-1"
+  default     = "ap-southeast-3"
 }
 
 variable "hw_project_id" {
@@ -54,17 +54,17 @@ variable "ecs_flavor" {
 variable "taurus_flavor" {
   description = "TaurusDB node flavor"
   type        = string
-  default     = "gaussdb.mysql.x1.xlarge.4"
+  default     = "gaussdb.mysql.xlarge.x86.4"
 }
 
 variable "availability_zone" {
   description = "Primary availability zone"
   type        = string
-  default     = "ap-southeast-1a"
+  default     = "ap-southeast-3a"
 }
 
 variable "availability_zone_2" {
   description = "Secondary availability zone for HA standby"
   type        = string
-  default     = "ap-southeast-1b"
+  default     = "ap-southeast-3b"
 }

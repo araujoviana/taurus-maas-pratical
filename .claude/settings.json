@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh -i *)",
+      "Bash(scp -i *)",
+      "Bash(ssh-keygen *)",
+      "Bash(uv sync)",
+      "Bash(uv tool *)",
+      "Bash(terraform plan *)",
+      "Bash(terraform plan)",
+      "Bash(terraform output *)",
+      "Bash(terraform state show *)",
+      "Bash(terraform state list *)",
+      "Bash(ansible -i * --list-hosts *)",
+      "Bash(nc -zv *)",
+      "Bash(ping *)",
+      "Bash(curl -s *)",
+      "Bash(curl -sv *)",
+      "Bash(grep -n *)",
+      "Bash(grep -E *)",
+      "Bash(grep -v *)",
+      "Bash(grep --version)",
+      "Bash(env | *)",
+      "Bash(git -C * status)",
+      "Bash(git -C * log *)"
+    ]
+  }
+}
