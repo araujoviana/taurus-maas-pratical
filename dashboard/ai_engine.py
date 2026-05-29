@@ -169,10 +169,17 @@ class MaaSClient:
 
         elif tool_name == "flag_transaction":
             try:
+                account_id = args.get("account_id")
+                if account_id is None:
+                    row = await self._db.fetchone(
+                        "SELECT account_id FROM transactions WHERE id = %s",
+                        (args["transaction_id"],),
+                    )
+                    account_id = row["account_id"] if row else None
                 await self._db.execute(
                     "INSERT INTO fraud_alerts (transaction_id, account_id, alert_type, confidence, reasoning) "
-                    "VALUES (%s, NULL, %s, %s, %s)",
-                    (args["transaction_id"], args["alert_type"], args["confidence"], args["reasoning"]),
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (args["transaction_id"], account_id, args["alert_type"], args["confidence"], args["reasoning"]),
                 )
                 return json.dumps({"status": "flagged", "transaction_id": args["transaction_id"]})
             except Exception as e:

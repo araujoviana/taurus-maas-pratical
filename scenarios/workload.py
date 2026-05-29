@@ -42,6 +42,10 @@ def _seed_transactions(account_ids: list[int], n_per_acct: int) -> list[tuple]:
     return rows
 
 
+def _async_call(coro, loop):
+    return asyncio.run_coroutine_threadsafe(coro, loop).result()
+
+
 def run_workload(
     db: Any,
     env: dict[str, str],
@@ -49,11 +53,7 @@ def run_workload(
 ) -> None:
     import asyncio
 
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    loop = asyncio.get_event_loop()
 
     fake = Faker()
     Faker.seed(42)
@@ -70,19 +70,20 @@ def run_workload(
         chunk = account_rows[i : i + BATCH_SIZE]
         placeholders = ",".join(["(%s,%s,%s,%s)"] * len(chunk))
         flat = [v for row in chunk for v in row]
-        loop.run_until_complete(
+        _async_call(
             db.execute(
                 f"INSERT INTO accounts (name, email, balance, risk_score) VALUES {placeholders}",
                 tuple(flat),
-            )
+            ),
+            loop,
         )
         inserted += len(chunk)
         batch_num += 1
         if on_progress:
             on_progress(round(5 + 30 * batch_num / TOTAL_BATCHES, 1))
 
-    result = loop.run_until_complete(
-        db.fetchall("SELECT id FROM accounts ORDER BY id", ())
+    result = _async_call(
+        db.fetchall("SELECT id FROM accounts ORDER BY id", ()), loop
     )
     account_ids = [r["id"] for r in result]
 
@@ -95,11 +96,12 @@ def run_workload(
         chunk = tx_rows[i : i + BATCH_SIZE]
         placeholders = ",".join(["(%s,%s,%s,%s,%s)"] * len(chunk))
         flat = [v for row in chunk for v in row]
-        loop.run_until_complete(
+        _async_call(
             db.execute(
                 f"INSERT INTO transactions (account_id, amount, tx_type, description, is_flagged) VALUES {placeholders}",
                 tuple(flat),
-            )
+            ),
+            loop,
         )
         tx_inserted += len(chunk)
         batch_num += 1

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordRequestForm
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -116,20 +116,17 @@ async def root():
 
 
 @app.post("/auth/login")
-async def login(request: Request, form: OAuth2PasswordRequestForm = Depends()):
-    """Issue a JWT after verifying credentials.
-
-    Username must be 'admin'; password must match DEMO_PASSWORD.
-    nginx basic auth protects the perimeter (port 80). This endpoint adds a
-    second check so state-changing API routes require an explicit token even
-    after the user has passed nginx authentication.
-
-    Note: the JWT secret is DEMO_PASSWORD itself (a non-trivial value).
-    A dedicated JWT_SECRET env var would be slightly stronger but adds
-    operational friction for a demo with localhost-only uvicorn.
-    """
+async def login(request: Request):
+    """Issue a JWT after verifying credentials."""
     secret = request.app.state.jwt_secret
-    if form.username != "admin" or form.password != secret:
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        body = await request.json()
+        username, password = body.get("username", ""), body.get("password", "")
+    else:
+        form = await request.form()
+        username, password = form.get("username", ""), form.get("password", "")
+    if username != "admin" or password != secret:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return {"access_token": create_token(secret), "token_type": "bearer"}
 

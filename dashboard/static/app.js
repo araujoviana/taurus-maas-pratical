@@ -2,17 +2,27 @@ let _token = sessionStorage.getItem('demo_token') || '';
 
 async function ensureAuth() {
   if (_token) return true;
-  const pw = prompt('Demo password:');
-  if (!pw) return false;
-  try {
-    const body = new URLSearchParams({ username: 'admin', password: pw });
-    const res = await fetch('/auth/login', { method: 'POST', body });
-    if (!res.ok) { alert('Wrong password'); return false; }
-    const { access_token } = await res.json();
-    _token = access_token;
-    sessionStorage.setItem('demo_token', _token);
-    return true;
-  } catch { return false; }
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('login-overlay');
+    overlay.style.display = 'flex';
+    const form = document.getElementById('login-form');
+    const errEl = document.getElementById('login-error');
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const pw = document.getElementById('login-password').value;
+      if (!pw) return;
+      try {
+        const body = new URLSearchParams({ username: 'admin', password: pw });
+        const res = await fetch('/auth/login', { method: 'POST', body });
+        if (!res.ok) { errEl.textContent = 'Wrong password'; return; }
+        const { access_token } = await res.json();
+        _token = access_token;
+        sessionStorage.setItem('demo_token', _token);
+        overlay.style.display = 'none';
+        resolve(true);
+      } catch { errEl.textContent = 'Connection error'; }
+    };
+  });
 }
 
 const MAX_POINTS = 120;
@@ -28,40 +38,57 @@ let chatChartInstance = null;
 
 function initCharts() {
   const common = {
-    chart: { type: 'line', height: 180, animations: { enabled: false }, background: 'transparent' },
+    chart: {
+      type: 'area',
+      height: 190,
+      animations: { enabled: true, speed: 400, dynamicAnimation: { enabled: true, speed: 400 } },
+      background: 'transparent',
+      toolbar: { show: false },
+      sparkline: { enabled: false },
+    },
     xaxis: { labels: { show: false }, axisTicks: { show: false }, axisBorder: { show: false } },
-    yaxis: { labels: { style: { colors: '#8b8fa3', fontSize: '11px' } } },
-    grid: { borderColor: '#2a2d3a', strokeDashArray: 3 },
+    yaxis: { labels: { style: { colors: '#6b7280', fontSize: '11px' } }, tickAmount: 3 },
+    grid: { borderColor: 'rgba(255,255,255,0.04)', strokeDashArray: 4 },
     stroke: { width: 2, curve: 'smooth' },
+    fill: {
+      type: 'gradient',
+      gradient: { shadeIntensity: 1, opacityFrom: 0.25, opacityTo: 0.02, stops: [0, 90, 100] },
+    },
+    dataLabels: { enabled: false },
     tooltip: { theme: 'dark' },
-    colors: ['#6c5ce7'],
+    colors: ['#818cf8'],
   };
 
   taurusChart = new ApexCharts(document.getElementById('taurus-chart'), {
     ...common,
     series: [{ name: 'QPS', data: [] }],
-    yaxis: { ...common.yaxis, title: { text: 'QPS', style: { color: '#8b8fa3' } } },
+    yaxis: { ...common.yaxis, title: { text: 'QPS', style: { color: '#6b7280', fontSize: '11px' } } },
   });
   taurusChart.render();
 
   maasChart = new ApexCharts(document.getElementById('maas-chart'), {
     ...common,
     series: [{ name: 'Latency', data: [] }],
-    colors: ['#00cec9'],
-    yaxis: { ...common.yaxis, title: { text: 'ms', style: { color: '#8b8fa3' } } },
+    colors: ['#22d3ee'],
+    fill: { ...common.fill, gradient: { shadeIntensity: 1, opacityFrom: 0.2, opacityTo: 0.01, stops: [0, 90, 100] } },
+    yaxis: { ...common.yaxis, title: { text: 'ms', style: { color: '#6b7280', fontSize: '11px' } } },
   });
   maasChart.render();
 
   latencyChart = new ApexCharts(document.getElementById('latency-chart'), {
     ...common,
-    chart: { ...common.chart, height: 220 },
+    chart: { ...common.chart, height: 240 },
     series: [
       { name: 'TaurusDB', data: [] },
       { name: 'MaaS AI', data: [] },
     ],
-    colors: ['#6c5ce7', '#00cec9'],
-    yaxis: { ...common.yaxis, title: { text: 'Latency (ms)', style: { color: '#8b8fa3' } } },
-    legend: { show: true, position: 'top', labels: { colors: '#8b8fa3' } },
+    colors: ['#818cf8', '#22d3ee'],
+    fill: {
+      type: 'gradient',
+      gradient: { shadeIntensity: 1, opacityFrom: 0.2, opacityTo: 0.01, stops: [0, 90, 100] },
+    },
+    yaxis: { ...common.yaxis, title: { text: 'Latency (ms)', style: { color: '#6b7280', fontSize: '11px' } } },
+    legend: { show: true, position: 'top', labels: { colors: '#6b7280' } },
   });
   latencyChart.render();
 }
@@ -110,7 +137,10 @@ function updateDashboard(data) {
 
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  const url = _token
+    ? `${proto}://${location.host}/ws?token=${_token}`
+    : `${proto}://${location.host}/ws`;
+  ws = new WebSocket(url);
   ws.onmessage = (e) => {
     try {
       updateDashboard(JSON.parse(e.data));
@@ -150,7 +180,7 @@ function killPrimary() { api('/scenario/kill-primary'); }
 async function aiAnalyze() {
   const res = await api('/scenario/ai-analyze');
   if (res && res.analysis) {
-    document.getElementById('ai-result').textContent = res.analysis;
+    document.getElementById('ai-result').innerHTML = renderMarkdown(res.analysis);
   } else if (res && res.error) {
     document.getElementById('ai-result').textContent = 'Error: ' + res.error;
   }
@@ -184,7 +214,7 @@ async function injectFraud(pattern) {
 async function runFraudAnalysis() {
   const res = await api('/fraud/analyze');
   if (res && res.summary) {
-    document.getElementById('ai-result').textContent = res.summary;
+    document.getElementById('ai-result').innerHTML = renderMarkdown(res.summary);
   }
   loadFraudAlerts();
 }
@@ -228,6 +258,17 @@ function timeSince(date) {
   return hours + 'h ago';
 }
 
+function showAiLoading() {
+  const historyEl = document.getElementById('chat-history');
+  historyEl.innerHTML += '<div class="chat-msg ai ai-loading" id="ai-loading"><div class="ai-spinner"></div> Thinking...</div>';
+  historyEl.scrollTop = historyEl.scrollHeight;
+}
+
+function hideAiLoading() {
+  const el = document.getElementById('ai-loading');
+  if (el) el.remove();
+}
+
 async function sendChat() {
   const input = document.getElementById('chat-input');
   const message = input.value.trim();
@@ -239,7 +280,12 @@ async function sendChat() {
 
   chatHistory.push({ role: 'user', content: message });
 
+  showAiLoading();
+
   const res = await api('/ai/chat', 'POST', { message, history: chatHistory });
+
+  hideAiLoading();
+
   if (!res) {
     historyEl.innerHTML += `<div class="chat-msg ai"><strong>AI:</strong> Error communicating with AI</div>`;
     return;
@@ -247,7 +293,7 @@ async function sendChat() {
 
   chatHistory.push({ role: 'assistant', content: res.text || '' });
 
-  let aiHtml = `<div class="chat-msg ai"><strong>AI:</strong> ${escapeHtml(res.text || '')}</div>`;
+  let aiHtml = `<div class="chat-msg ai"><strong>AI:</strong> ${renderMarkdown(res.text || '')}</div>`;
   if (res.sql) {
     aiHtml += `<div class="chat-sql"><details><summary>SQL Query</summary><code>${escapeHtml(res.sql)}</code></details></div>`;
   }
@@ -260,6 +306,25 @@ async function sendChat() {
   }
 
   historyEl.scrollTop = historyEl.scrollHeight;
+}
+
+function renderMarkdown(text) {
+  let html = escapeHtml(text);
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+  html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>');
+  html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+  html = html.replace(/<\/ul>\s*<ul>/g, '');
+  html = html.replace(/\n{2,}/g, '</p><p>');
+  html = html.replace(/\n/g, '<br>');
+  html = '<p>' + html + '</p>';
+  html = html.replace(/<p>\s*<\/p>/g, '');
+  return html;
 }
 
 function renderChatChart(containerId, chart) {
@@ -332,7 +397,7 @@ async function generateReport() {
   let html = `<div class="report-ts">Generated: ${new Date(res.generated_at * 1000).toLocaleString()}</div>`;
   if (res.sections) {
     res.sections.forEach(s => {
-      html += `<div class="report-section"><h3>${s.title}</h3><p>${s.content}</p></div>`;
+      html += `<div class="report-section"><h3>${s.title}</h3><p>${renderMarkdown(s.content)}</p></div>`;
     });
   }
   body.innerHTML = html;
@@ -352,11 +417,13 @@ async function fetchCommentary() {
   } catch {}
 }
 
-initCharts();
-connectWS();
-setInterval(loadTransactions, 5000);
-setInterval(loadFraudAlerts, 5000);
-setInterval(fetchCommentary, 30000);
-loadTransactions();
-loadFraudAlerts();
-setTimeout(fetchCommentary, 2000);
+ensureAuth().then(() => {
+  initCharts();
+  connectWS();
+  setInterval(loadTransactions, 5000);
+  setInterval(loadFraudAlerts, 5000);
+  setInterval(fetchCommentary, 30000);
+  loadTransactions();
+  loadFraudAlerts();
+  setTimeout(fetchCommentary, 2000);
+});

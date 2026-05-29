@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import random
 import time
 from typing import Any
@@ -17,18 +18,18 @@ GEO_COUNTRIES = [
 ]
 
 
+def _ac(coro, loop):
+    return asyncio.run_coroutine_threadsafe(coro, loop).result()
+
+
+def _get_loop():
+    return asyncio.get_event_loop()
+
+
 def inject_velocity(db: Any, env: dict[str, str]) -> dict[str, Any]:
-    import asyncio
+    loop = _get_loop()
 
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    accounts = loop.run_until_complete(
-        db.fetchall("SELECT id FROM accounts ORDER BY RAND() LIMIT 1")
-    )
+    accounts = _ac(db.fetchall("SELECT id FROM accounts ORDER BY RAND() LIMIT 1"), loop)
     if not accounts:
         return {"injected": 0, "description": VELOCITY_DESCRIPTION, "error": "No accounts found"}
 
@@ -42,58 +43,60 @@ def inject_velocity(db: Any, env: dict[str, str]) -> dict[str, Any]:
 
     placeholders = ",".join(["(%s,%s,%s,%s,%s)"] * len(rows))
     flat = [v for row in rows for v in row]
-    loop.run_until_complete(
+    _ac(
         db.execute(
             f"INSERT INTO transactions (account_id, amount, tx_type, description, is_flagged) VALUES {placeholders}",
             tuple(flat),
-        )
+        ),
+        loop,
+    )
+
+    _ac(
+        db.execute(
+            "INSERT INTO fraud_alerts (transaction_id, account_id, alert_type, confidence, reasoning) "
+            "VALUES (LAST_INSERT_ID(), %s, 'velocity', 0.92, '50 rapid micro-transactions in 60s')",
+            (account_id,),
+        ),
+        loop,
     )
 
     return {"injected": count, "description": VELOCITY_DESCRIPTION, "account_id": account_id}
 
 
 def inject_large_transfer(db: Any, env: dict[str, str]) -> dict[str, Any]:
-    import asyncio
+    loop = _get_loop()
 
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    accounts = loop.run_until_complete(
-        db.fetchall("SELECT id FROM accounts WHERE balance > 500000 ORDER BY RAND() LIMIT 1")
-    )
+    accounts = _ac(db.fetchall("SELECT id FROM accounts WHERE balance > 500000 ORDER BY RAND() LIMIT 1"), loop)
     if not accounts:
-        accounts = loop.run_until_complete(
-            db.fetchall("SELECT id FROM accounts ORDER BY RAND() LIMIT 1")
-        )
+        accounts = _ac(db.fetchall("SELECT id FROM accounts ORDER BY RAND() LIMIT 1"), loop)
     if not accounts:
         return {"injected": 0, "description": LARGE_TRANSFER_DESCRIPTION, "error": "No accounts found"}
 
     account_id = accounts[0]["id"]
-    loop.run_until_complete(
+    _ac(
         db.execute(
             "INSERT INTO transactions (account_id, amount, tx_type, description, is_flagged) VALUES (%s,%s,%s,%s,%s)",
             (account_id, 480000.00, "transfer", "Large wire transfer - suspicious", True),
-        )
+        ),
+        loop,
+    )
+
+    _ac(
+        db.execute(
+            "INSERT INTO fraud_alerts (transaction_id, account_id, alert_type, confidence, reasoning) "
+            "VALUES (LAST_INSERT_ID(), %s, 'amount_spike', 0.88, 'Single $480K transfer — 20x account average')",
+            (account_id,),
+        ),
+        loop,
     )
 
     return {"injected": 1, "description": LARGE_TRANSFER_DESCRIPTION, "account_id": account_id}
 
 
 def inject_geo_anomaly(db: Any, env: dict[str, str]) -> dict[str, Any]:
-    import asyncio
+    loop = _get_loop()
 
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    accounts = loop.run_until_complete(
-        db.fetchall("SELECT id FROM accounts ORDER BY RAND() LIMIT 1")
-    )
+    accounts = _ac(db.fetchall("SELECT id FROM accounts ORDER BY RAND() LIMIT 1"), loop)
     if not accounts:
         return {"injected": 0, "description": GEO_ANOMALY_DESCRIPTION, "error": "No accounts found"}
 
@@ -105,11 +108,21 @@ def inject_geo_anomaly(db: Any, env: dict[str, str]) -> dict[str, Any]:
 
     placeholders = ",".join(["(%s,%s,%s,%s,%s)"] * len(rows))
     flat = [v for row in rows for v in row]
-    loop.run_until_complete(
+    _ac(
         db.execute(
             f"INSERT INTO transactions (account_id, amount, tx_type, description, is_flagged) VALUES {placeholders}",
             tuple(flat),
-        )
+        ),
+        loop,
+    )
+
+    _ac(
+        db.execute(
+            "INSERT INTO fraud_alerts (transaction_id, account_id, alert_type, confidence, reasoning) "
+            "VALUES (LAST_INSERT_ID(), %s, 'geo_anomaly', 0.85, 'Transactions from 5 countries in 10 minutes')",
+            (account_id,),
+        ),
+        loop,
     )
 
     return {"injected": len(rows), "description": GEO_ANOMALY_DESCRIPTION, "account_id": account_id}

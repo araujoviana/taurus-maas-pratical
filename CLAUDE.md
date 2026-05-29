@@ -138,6 +138,135 @@ See `.env.example` for the full list. Variables auto-filled by `gen_inventory.py
 - [ ] Verify WebSocket stream: open browser devtools → WS frames arriving every 1s
 - [ ] Rehearse all 3 acts end-to-end
 
+## Live Deployment Reference
+
+This section documents the running ECS deployment so any AI session can manage it.
+
+### ECS Instance
+
+| Field | Value |
+|---|---|
+| Name | `taurus-demo-runner-v2` |
+| ID | `YOUR_ECS_INSTANCE_ID` |
+| Public IP | `YOUR_ECS_PUBLIC_IP` |
+| Private IP | `YOUR_ECS_PRIVATE_IP` |
+| Region | `ap-southeast-1` |
+| AZ | `ap-southeast-1a` |
+| OS | Ubuntu 24.04 |
+| Root password | `YOUR_DEMO_PASSWORD` |
+| SSH | `ssh root@YOUR_ECS_PUBLIC_IP` (password auth) |
+
+### TaurusDB (GaussDB MySQL)
+
+| Field | Value |
+|---|---|
+| Instance ID | `taurusdb-demo` (check terraform state for exact ID) |
+| Private IP | `YOUR_TAURUS_DB_PRIVATE_IP` |
+| Port | `3306` |
+| Root password | `YOUR_DEMO_PASSWORD` |
+| Database | `taurus_demo` |
+| Tables | `accounts` (10k rows), `transactions` (500k rows), `fraud_alerts` |
+| Public access | **Not available** — private VPC only |
+
+### Network
+
+| Field | Value |
+|---|---|
+| VPC ID | `YOUR_VPC_ID` |
+| Subnet ID | `YOUR_SUBNET_ID` |
+| Security Group | `YOUR_SG_ID` |
+| Old EIP (unbound) | `YOUR_OLD_EIP` / ID `YOUR_OLD_EIP_ID` |
+
+### Huawei Cloud Credentials
+
+| Field | Value |
+|---|---|
+| AK | `YOUR_HW_ACCESS_KEY` |
+| SK | `YOUR_HW_SECRET_KEY` |
+| Project ID | In `.env` on ECS / `terraform/terraform.tfvars` |
+
+### MaaS AI
+
+| Field | Value |
+|---|---|
+| Base URL | `https://api-ap-southeast-1.modelarts-maas.com/openai/v1` |
+| Model | `glm-5.1` |
+| API Key | In `.env` on ECS (sourced from opencode config) |
+
+### App Stack on ECS
+
+- **App dir**: `/opt/taurus-demo/`
+- **Python**: 3.14 (via uv)
+- **uv**: `/root/.local/bin/uv` (add to PATH: `export PATH="/root/.local/bin:$PATH"`)
+- **App server**: uvicorn on `127.0.0.1:8000` (started via `nohup uv run python main.py`)
+- **nginx**: reverse proxy `80→8000`, WebSocket at `/ws`, static files at `/static/`
+- **nginx config**: `/etc/nginx/sites-available/taurus-demo`
+- **Auth**: JWT only (login overlay on page load, `sessionStorage` token). nginx basic auth was **removed**.
+- **App log**: `/tmp/app.log`
+- **Seed log**: `/tmp/seed.log`
+
+### Common Operations (run on ECS via SSH)
+
+```bash
+# SSH into ECS
+ssh root@YOUR_ECS_PUBLIC_IP
+
+# Check if app is running
+ss -tlnp | grep 8000
+
+# Start the app
+cd /opt/taurus-demo && PATH="/root/.local/bin:$PATH" nohup uv run python main.py > /tmp/app.log 2>&1 &
+
+# Stop the app
+pkill -f "python.*main.py"
+
+# Restart the app
+pkill -f "python.*main.py"; sleep 2; cd /opt/taurus-demo && PATH="/root/.local/bin:$PATH" nohup uv run python main.py > /tmp/app.log 2>&1 &
+
+# Check app logs
+tail -f /tmp/app.log
+
+# Re-seed the database (full: 10k accounts + 500k transactions)
+cd /opt/taurus-demo && PATH="/root/.local/bin:$PATH" uv run python scripts/seed_data.py
+
+# Test DB connectivity from ECS
+mysql -h YOUR_TAURUS_DB_PRIVATE_IP -P 3306 -u root -p'YOUR_DEMO_PASSWORD' -e "SELECT 1" taurus_demo
+
+# Reload nginx
+nginx -t && systemctl reload nginx
+```
+
+### Deploying Code Changes
+
+```bash
+# From local machine — upload changed files
+sshpass -p 'YOUR_DEMO_PASSWORD' scp -o StrictHostKeyChecking=no \
+  dashboard/main.py dashboard/ai_engine.py \
+  dashboard/static/app.js dashboard/static/index.html dashboard/static/style.css \
+  scenarios/workload.py scenarios/fraud_injection.py \
+  root@YOUR_ECS_PUBLIC_IP:/tmp/upload/
+
+# On ECS — copy to app dir and restart
+ssh root@YOUR_ECS_PUBLIC_IP
+cp /tmp/upload/main.py /opt/taurus-demo/dashboard/
+cp /tmp/upload/ai_engine.py /opt/taurus-demo/dashboard/
+cp /tmp/upload/app.js /opt/taurus-demo/dashboard/static/
+cp /tmp/upload/index.html /opt/taurus-demo/dashboard/static/
+cp /tmp/upload/style.css /opt/taurus-demo/dashboard/static/
+cp /tmp/upload/workload.py /opt/taurus-demo/scenarios/
+cp /tmp/upload/fraud_injection.py /opt/taurus-demo/scenarios/
+pkill -f "python.*main.py"; sleep 2
+cd /opt/taurus-demo && PATH="/root/.local/bin:$PATH" nohup uv run python main.py > /tmp/app.log 2>&1 &
+```
+
+### Known Issues / Design Decisions
+
+- **No systemd service**: App runs via `nohup`. For persistence across reboots, create a systemd unit (template at `ansible/templates/taurus-demo.service.j2`).
+- **Terraform state drift**: The ECS was recreated manually (v2), so terraform state doesn't track the current ECS. Run `terraform apply` carefully — it may try to recreate resources.
+- **University WiFi proxy**: The presenter's university WiFi blocks non-standard ports. SSH/HTTP work from other networks. The dashboard is accessible at `http://YOUR_ECS_PUBLIC_IP`.
+- **Chrome basic auth**: Removed nginx basic auth to avoid Chrome's auth popup issues. Auth is now JWT-only via the app's login overlay.
+- **asyncio loop bug**: `run_in_executor` tasks that call async DB methods must use `asyncio.run_coroutine_threadsafe()` — NOT `loop.run_until_complete()`. This was the cause of the "attached to a different loop" error in Act 1.
+
 ## TaurusDB features demonstrated
 
 | Feature | Where shown |

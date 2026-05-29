@@ -4,17 +4,54 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TaurusDB + MaaS AI — Live Demo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
 </head>
 <body>
+  <div class="bg-grid"></div>
+  <div class="bg-glow-tl"></div>
+  <div class="bg-glow-tr"></div>
+
   <header>
-    <h1>TaurusDB + MaaS AI Demo</h1>
-    <div class="status-bar">
-      <span><span class="status-dot" id="db-dot"></span>TaurusDB</span>
-      <span><span class="status-dot" id="maas-dot"></span>MaaS AI</span>
-      <span id="scenario-badge" style="font-size:0.8rem;color:var(--muted)">idle</span>
-      <button class="btn small" onclick="generateReport()">Generate Report</button>
+    <div class="header-brand">
+      <div class="brand-mark">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <circle cx="14" cy="14" r="13" stroke="url(#bg1)" stroke-width="1.5"/>
+          <path d="M8 14 L14 8 L20 14 L14 20 Z" fill="url(#bg1)" opacity="0.9"/>
+          <circle cx="14" cy="14" r="3" fill="white"/>
+          <defs>
+            <linearGradient id="bg1" x1="0" y1="0" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#818cf8"/>
+              <stop offset="1" stop-color="#22d3ee"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <div class="brand-title">TaurusDB <span class="brand-plus">+</span> MaaS AI</div>
+        <div class="brand-sub">Huawei Cloud &middot; Fintech Live Demo</div>
+      </div>
+    </div>
+    <div class="header-center">
+      <div class="status-bar">
+        <div class="status-item">
+          <span class="status-dot" id="db-dot"></span>
+          <span>TaurusDB</span>
+        </div>
+        <div class="status-item">
+          <span class="status-dot" id="maas-dot"></span>
+          <span>MaaS AI</span>
+        </div>
+        <div class="scenario-pill" id="scenario-badge">idle</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="btn small outline" onclick="generateReport()">
+        <svg width="13" height="13" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8" stroke="currentColor" stroke-width="2" fill="none"/><line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" stroke-width="2"/><line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" stroke-width="2"/><polyline points="10,9 9,9 8,9" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+        Report
+      </button>
     </div>
   </header>
 
@@ -23,105 +60,170 @@
     <span class="ticker-text" id="ticker-text">Waiting for metrics...</span>
   </div>
 
+  <!-- KPI Strip -->
+  <div class="kpi-strip">
+    <div class="kpi-item">
+      <div class="kpi-value accent-text" id="taurus-qps">0</div>
+      <div class="kpi-label">Queries / sec</div>
+    </div>
+    <div class="kpi-sep"></div>
+    <div class="kpi-item">
+      <div class="kpi-value" id="taurus-latency">0</div>
+      <div class="kpi-label">DB Latency (ms)</div>
+    </div>
+    <div class="kpi-sep"></div>
+    <div class="kpi-item">
+      <div class="kpi-value cyan-text" id="taurus-conn">0</div>
+      <div class="kpi-label">Connections</div>
+    </div>
+    <div class="kpi-sep"></div>
+    <div class="kpi-item">
+      <div class="kpi-value cyan-text" id="maas-latency">0</div>
+      <div class="kpi-label">AI Latency (ms)</div>
+    </div>
+    <div class="kpi-sep"></div>
+    <div class="kpi-item">
+      <div class="kpi-value mono" id="maas-model">—</div>
+      <div class="kpi-label">AI Model</div>
+    </div>
+    <div class="kpi-sep"></div>
+    <div class="kpi-item">
+      <div class="kpi-value danger-text" id="maas-err">0</div>
+      <div class="kpi-label">Errors</div>
+    </div>
+  </div>
+
   <main>
-    <!-- TaurusDB Metrics -->
+    <!-- Scenario Acts -->
+    <div class="card full acts-card">
+      <div class="acts-header">
+        <h2>Demo Scenarios</h2>
+        <div class="acts-meta">
+          <div class="scenario-status" id="scenario-msg">Ready</div>
+          <button class="btn small" onclick="resetScenario()">↺ Reset</button>
+        </div>
+      </div>
+
+      <div class="acts-grid">
+        <div class="act-tile act-1">
+          <div class="act-num">01</div>
+          <div class="act-body">
+            <div class="act-name">Performance Storm</div>
+            <div class="act-desc">Bulk-load 500k transactions and observe live QPS spikes and latency distribution</div>
+            <button class="btn act-btn primary" onclick="startLoad()">
+              <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+              Start Load Test
+            </button>
+          </div>
+        </div>
+
+        <div class="act-tile act-2">
+          <div class="act-num">02</div>
+          <div class="act-body">
+            <div class="act-name">HA Resilience</div>
+            <div class="act-desc">Trigger primary→standby switchover, observe sub-30s recovery through the proxy</div>
+            <button class="btn act-btn danger-btn" onclick="killPrimary()">
+              <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+              Kill Primary
+            </button>
+          </div>
+        </div>
+
+        <div class="act-tile act-3">
+          <div class="act-num">03</div>
+          <div class="act-body">
+            <div class="act-name">AI Intelligence</div>
+            <div class="act-desc">GLM-5.1 fraud pattern analysis, high-risk account escalation and AI commentary</div>
+            <button class="btn act-btn cyan-btn" onclick="aiAnalyze()">
+              <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 14.93V15a1 1 0 0 0-2 0v1.93A8 8 0 0 1 4.07 11H6a1 1 0 0 0 0-2H4.07A8 8 0 0 1 11 4.07V6a1 1 0 0 0 2 0V4.07A8 8 0 0 1 19.93 11H18a1 1 0 0 0 0 2h1.93A8 8 0 0 1 13 16.93z"/></svg>
+              Run AI Analysis
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="progress-bar"><div class="fill" id="progress-fill" style="width:0%"></div></div>
+
+      <div class="fraud-row">
+        <span class="row-label">Fraud Injection</span>
+        <div class="actions">
+          <button class="btn warning small" onclick="injectFraud('velocity')">⚡ Velocity</button>
+          <button class="btn warning small" onclick="injectFraud('large_transfer')">💸 Large Transfer</button>
+          <button class="btn warning small" onclick="injectFraud('geo_anomaly')">📍 Geo Anomaly</button>
+          <button class="btn cyan-outline small" onclick="runFraudAnalysis()">◆ Run AI Detection</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts -->
     <div class="card">
-      <h2>TaurusDB Metrics</h2>
-      <div class="metrics-grid">
-        <div class="metric">
-          <div class="value" id="taurus-qps">0</div>
-          <div class="label">QPS</div>
-        </div>
-        <div class="metric">
-          <div class="value" id="taurus-latency">0</div>
-          <div class="label">Latency (ms)</div>
-        </div>
-        <div class="metric">
-          <div class="value" id="taurus-conn">0</div>
-          <div class="label">Connections</div>
-        </div>
+      <div class="card-header-row">
+        <h2>Query Throughput</h2>
+        <div class="chart-legend accent-text">QPS</div>
       </div>
       <div class="chart-container" id="taurus-chart"></div>
     </div>
 
-    <!-- MaaS AI Metrics -->
     <div class="card">
-      <h2>MaaS AI Metrics</h2>
-      <div class="metrics-grid">
-        <div class="metric">
-          <div class="value" id="maas-latency">0</div>
-          <div class="label">Latency (ms)</div>
-        </div>
-        <div class="metric">
-          <div class="value" id="maas-model">—</div>
-          <div class="label">Model</div>
-        </div>
-        <div class="metric">
-          <div class="value" id="maas-err">0</div>
-          <div class="label">Errors</div>
-        </div>
+      <div class="card-header-row">
+        <h2>AI Inference Latency</h2>
+        <div class="chart-legend cyan-text">ms</div>
       </div>
       <div class="chart-container" id="maas-chart"></div>
     </div>
 
-    <!-- Scenario Controls -->
     <div class="card full">
-      <h2>Scenario Controls</h2>
-      <div class="actions">
-        <button class="btn primary" onclick="startLoad()">Act 1 — Start Load</button>
-        <button class="btn danger" onclick="killPrimary()">Act 2 — Kill Primary</button>
-        <button class="btn" onclick="aiAnalyze()">Act 3 — AI Fraud Analysis</button>
-        <button class="btn" onclick="resetScenario()">Reset</button>
-      </div>
-      <h3>Fraud Injection</h3>
-      <div class="actions">
-        <button class="btn warning" onclick="injectFraud('velocity')">Velocity Fraud</button>
-        <button class="btn warning" onclick="injectFraud('large_transfer')">Large Transfer</button>
-        <button class="btn warning" onclick="injectFraud('geo_anomaly')">Geo Anomaly</button>
-        <button class="btn accent2" onclick="runFraudAnalysis()">Run AI Detection</button>
-      </div>
-      <div class="scenario-status" id="scenario-msg">Ready</div>
-      <div class="progress-bar"><div class="fill" id="progress-fill" style="width:0%"></div></div>
+      <h2>System Latency Comparison</h2>
+      <div class="chart-container tall" id="latency-chart"></div>
     </div>
 
-    <!-- Latency Chart -->
-    <div class="card full">
-      <h2>Latency Over Time</h2>
-      <div class="chart-container" id="latency-chart"></div>
-    </div>
-
-    <!-- Recent Transactions -->
+    <!-- Data Row -->
     <div class="card">
       <h2>Recent Transactions</h2>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>ID</th><th>Account</th><th>Amount</th><th>Type</th><th>Flagged</th></tr></thead>
+          <thead>
+            <tr><th>ID</th><th>Account</th><th>Amount</th><th>Type</th><th>Status</th></tr>
+          </thead>
           <tbody id="tx-body"></tbody>
         </table>
       </div>
     </div>
 
-    <!-- Fraud Alerts Feed -->
     <div class="card">
-      <h2>Fraud Alerts</h2>
+      <div class="card-header-row">
+        <h2>Fraud Alerts</h2>
+        <span class="live-badge">
+          <span class="live-dot"></span>LIVE
+        </span>
+      </div>
       <div class="alerts-feed" id="alerts-feed">
         <div class="alerts-empty">No alerts yet. Inject fraud patterns to trigger detection.</div>
       </div>
     </div>
 
-    <!-- AI Analysis Result -->
+    <!-- AI Row -->
     <div class="card">
-      <h2>AI Analysis</h2>
-      <div class="ai-result" id="ai-result">No analysis yet. Click "Act 3 — AI Fraud Analysis" to start.</div>
+      <h2>AI Analysis Result</h2>
+      <div class="ai-result" id="ai-result">
+        <div class="ai-placeholder">
+          <svg width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2" opacity="0.3"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+          <span>Run Act 3 or AI Detection to see analysis</span>
+        </div>
+      </div>
     </div>
 
-    <!-- AI Chat Panel -->
-    <div class="card full chat-panel">
-      <h2>AI Analyst <span class="chat-badge">GLM-5.1</span></h2>
+    <div class="card chat-panel">
+      <div class="card-header-row">
+        <h2>AI Analyst</h2>
+        <span class="chat-badge">GLM-5.1</span>
+      </div>
       <div class="chat-history" id="chat-history"></div>
       <div class="chat-input-row">
-        <input type="text" id="chat-input" placeholder="Ask a question about your data..." onkeydown="if(event.key==='Enter')sendChat()">
-        <button class="btn accent2" onclick="sendChat()">Send</button>
+        <input type="text" id="chat-input" placeholder="Ask about your data..." onkeydown="if(event.key==='Enter')sendChat()">
+        <button class="btn send-btn" onclick="sendChat()">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
       </div>
     </div>
   </main>
@@ -133,12 +235,43 @@
         <h2>Executive Report</h2>
         <div>
           <button class="btn small" onclick="window.print()">Print / PDF</button>
-          <button class="btn small" onclick="closeReportModal()">Close</button>
+          <button class="btn small" onclick="closeReportModal()">✕ Close</button>
         </div>
       </div>
       <div class="modal-body" id="report-body">
         <div class="report-loading">Generating report...</div>
       </div>
+    </div>
+  </div>
+
+  <!-- Login Overlay -->
+  <div class="login-overlay" id="login-overlay" style="display:none">
+    <div class="login-bg-grid"></div>
+    <div class="login-glow"></div>
+    <div class="login-box">
+      <div class="login-logo">
+        <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+          <circle cx="20" cy="20" r="19" stroke="url(#lg1)" stroke-width="1.5"/>
+          <path d="M10 20 L20 10 L30 20 L20 30 Z" fill="url(#lg1)" opacity="0.85"/>
+          <circle cx="20" cy="20" r="4" fill="white"/>
+          <defs>
+            <linearGradient id="lg1" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#818cf8"/>
+              <stop offset="1" stop-color="#22d3ee"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <h2 class="login-title">TaurusDB + MaaS AI</h2>
+      <p class="login-sub">Huawei Cloud · Enterprise Demo</p>
+      <form id="login-form">
+        <div class="login-field">
+          <svg class="login-field-icon" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <input type="password" id="login-password" placeholder="Enter demo password" autofocus>
+        </div>
+        <button type="submit" class="btn login-btn">Authenticate</button>
+        <div class="login-error" id="login-error"></div>
+      </form>
     </div>
   </div>
 
