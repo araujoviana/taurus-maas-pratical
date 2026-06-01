@@ -140,6 +140,8 @@ See `.env.example` for the full list. Variables auto-filled by `gen_inventory.py
 
 ## Live Deployment Reference
 
+> **Do not put real credentials here.** Fill in your actual IPs, IDs, and passwords only in `.env` and `terraform/terraform.tfvars` (both gitignored). This section is a structural template for AI assistant context.
+
 This section documents the running ECS deployment so any AI session can manage it.
 
 ### ECS Instance
