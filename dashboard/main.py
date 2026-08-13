@@ -17,6 +17,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -261,8 +262,11 @@ async def ai_chat(
     request: Request, body: ChatRequest, _: dict = Depends(_require_auth)
 ):
     client: MaaSClient = request.app.state.maas_client
-    result = await client.chat(body.message, body.history)
-    return result
+    try:
+        result = await client.chat(body.message, body.history)
+        return result
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.get("/ai/commentary")
@@ -278,6 +282,8 @@ async def get_commentary(request: Request):
             "connections": t_metrics.connected,
             "slow_queries": t_metrics.slow_queries,
             "scenario_state": sm.info.state.value,
+            "scenario_message": sm.info.message,
+            "scenario_progress": sm.info.progress,
         }
     except Exception:
         metrics_snapshot = {
@@ -286,6 +292,8 @@ async def get_commentary(request: Request):
             "connections": 0,
             "slow_queries": 0,
             "scenario_state": "idle",
+            "scenario_message": "",
+            "scenario_progress": 0,
         }
     text = await client.get_commentary(metrics_snapshot)
     return {"text": text, "ts": time.time()}

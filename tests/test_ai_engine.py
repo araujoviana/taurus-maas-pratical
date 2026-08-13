@@ -5,7 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from dashboard.ai_engine import MaaSClient, _validate_sql, TOOL_DEFINITIONS
+from dashboard.ai_engine import (
+    MaaSClient,
+    _validate_sql,
+    TOOL_DEFINITIONS,
+    REPORT_TOOL_DEFINITIONS,
+    REPORT_SECTION_PROMPTS,
+)
 
 
 def _mock_db():
@@ -185,6 +191,47 @@ async def test_execute_unknown_tool():
 
 
 # ---------------------------------------------------------------------------
+# MaaSClient._run_tool_loop error handling
+# ---------------------------------------------------------------------------
+
+
+async def test_run_tool_loop_handles_malformed_tool_arguments():
+    """A malformed JSON tool-call argument must not crash the loop — it should
+    feed a tool-error message back so the model can retry, and the loop should
+    still reach a final answer on the next iteration."""
+    db = _mock_db()
+    bad_tc = MagicMock()
+    bad_tc.id = "call_bad"
+    bad_tc.function.name = "run_sql"
+    bad_tc.function.arguments = "{not valid json"
+
+    first_response = _mock_openai_response(content="", tool_calls=[bad_tc])
+    second_response = _mock_openai_response(content="Recovered after invalid args")
+
+    with patch("dashboard.ai_engine.AsyncOpenAI") as MockOpenAI:
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[first_response, second_response]
+        )
+        MockOpenAI.return_value = mock_client
+        client = MaaSClient(api_key="k", base_url="u", model="m", db=db)
+
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hi"},
+    ]
+    result = await client._run_tool_loop(messages)
+
+    assert result["content"] == "Recovered after invalid args"
+    assert mock_client.chat.completions.create.call_count == 2
+
+    tool_msgs = [m for m in messages if m.get("role") == "tool"]
+    assert len(tool_msgs) == 1
+    parsed = json.loads(tool_msgs[0]["content"])
+    assert "error" in parsed
+
+
+# ---------------------------------------------------------------------------
 # MaaSClient chat
 # ---------------------------------------------------------------------------
 
@@ -257,6 +304,44 @@ async def test_get_commentary_uses_cache():
     assert mock_client.chat.completions.create.call_count == 1
 
 
+async def test_get_commentary_ttl_scenario_aware():
+    """Cache TTL should be short (6s) while a scenario is active, long (25s) at idle."""
+    db = _mock_db()
+    with (
+        patch("dashboard.ai_engine.AsyncOpenAI") as MockOpenAI,
+        patch("dashboard.ai_engine.time.time") as mock_time,
+    ):
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[
+                _mock_openai_response("msg1"),
+                _mock_openai_response("msg2"),
+            ]
+        )
+        MockOpenAI.return_value = mock_client
+        client = MaaSClient(api_key="k", base_url="u", model="m", db=db)
+
+        # First call at t=0 (idle) — cache miss, populates cache.
+        mock_time.return_value = 0
+        result1 = await client.get_commentary({"qps": 1, "scenario_state": "idle"})
+        assert result1 == "msg1"
+        assert mock_client.chat.completions.create.call_count == 1
+
+        # 10s later, still idle: 10s < 25s idle TTL -> cache hit, no new call.
+        mock_time.return_value = 10
+        result2 = await client.get_commentary({"qps": 1, "scenario_state": "idle"})
+        assert result2 == "msg1"
+        assert mock_client.chat.completions.create.call_count == 1
+
+        # 11s since last refresh, but now a scenario is active: 11s >= 6s active
+        # TTL -> cache must be treated as stale even though it would still be
+        # fresh under the idle TTL.
+        mock_time.return_value = 11
+        result3 = await client.get_commentary({"qps": 1, "scenario_state": "loading"})
+        assert result3 == "msg2"
+        assert mock_client.chat.completions.create.call_count == 2
+
+
 # ---------------------------------------------------------------------------
 # MaaSClient analyze_anomalies
 # ---------------------------------------------------------------------------
@@ -287,18 +372,56 @@ async def test_analyze_anomalies():
 
 
 async def test_generate_report():
+    """generate_report() now runs 4 concurrent _run_tool_loop calls (one per
+    section) instead of 6 canned queries + 1 narrative call + string parsing."""
     db = _mock_db()
     db.fetchall = AsyncMock(return_value=[{"total": 1000}])
-    report_text = "Executive Summary\nAll systems healthy.\n\nRisk Assessment\nLow risk overall.\n\nTop Opportunities\nExpand to new markets.\n\nRecommendations\nIncrease monitoring."
     with patch("dashboard.ai_engine.AsyncOpenAI") as MockOpenAI:
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(
-            return_value=_mock_openai_response(report_text)
+            return_value=_mock_openai_response("Section body text.")
         )
         MockOpenAI.return_value = mock_client
         client = MaaSClient(api_key="k", base_url="u", model="m", db=db)
 
     result = await client.generate_report()
+
     assert "sections" in result
     assert "generated_at" in result
-    assert "data" in result
+    assert "data" not in result
+
+    titles = {s["title"] for s in result["sections"]}
+    assert titles == set(REPORT_SECTION_PROMPTS.keys())
+    assert len(result["sections"]) == 4
+    for section in result["sections"]:
+        assert section["content"] == "Section body text."
+
+    # One tool-loop iteration per section — no tool calls in the mocked
+    # response, so each section makes exactly one chat.completions.create call.
+    assert mock_client.chat.completions.create.call_count == 4
+
+
+async def test_generate_report_section_failure_is_graceful():
+    """If one section's tool loop raises, it should degrade to a fallback
+    message instead of failing the whole report."""
+    db = _mock_db()
+    with patch("dashboard.ai_engine.AsyncOpenAI") as MockOpenAI:
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=RuntimeError("MaaS API unreachable")
+        )
+        MockOpenAI.return_value = mock_client
+        client = MaaSClient(api_key="k", base_url="u", model="m", db=db)
+
+    result = await client.generate_report()
+    assert len(result["sections"]) == 4
+    for section in result["sections"]:
+        assert section["content"] == "Unable to generate this section."
+
+
+def test_report_tool_definitions_excludes_flag_transaction():
+    names = [t["function"]["name"] for t in REPORT_TOOL_DEFINITIONS]
+    assert "flag_transaction" not in names
+    assert "run_sql" in names
+    assert "get_db_metrics" in names
+    assert "get_account_details" in names

@@ -95,6 +95,16 @@ def looks_like_placeholder(value: str) -> bool:
     return any(marker in v.lower() for marker in PLACEHOLDER_MARKERS)
 
 
+def looks_like_code_expression(content: str, match: re.Match) -> bool:
+    """True if the matched value is immediately followed by `.` or `(`, e.g.
+    `token = localStorage.getItem(...)` or `secret = os.environ.get(...)`.
+    Real hardcoded secrets are string literals, not property/method access —
+    this avoids flagging bare identifiers like `localStorage`/`sessionStorage`
+    that happen to be 12+ alnum characters."""
+    end = match.end(match.lastindex)
+    return content[end : end + 1] in (".", "(")
+
+
 def is_sensitive_filename(path: str) -> bool:
     if path in ("/dev/null", ""):
         return False
@@ -128,7 +138,11 @@ def scan(diff_text: str) -> list[tuple[str, str | None, str]]:
 
         for label, pat in SOFT_CONTENT_PATTERNS:
             m = pat.search(content)
-            if m and not looks_like_placeholder(m.group(m.lastindex)):
+            if (
+                m
+                and not looks_like_placeholder(m.group(m.lastindex))
+                and not looks_like_code_expression(content, m)
+            ):
                 findings.append((current_file or "?", content.strip()[:80], label))
 
     return findings

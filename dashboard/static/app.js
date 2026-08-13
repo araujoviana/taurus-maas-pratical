@@ -1,4 +1,4 @@
-let _token = sessionStorage.getItem('demo_token') || '';
+let _token = localStorage.getItem('demo_token') || '';
 
 async function ensureAuth() {
   if (_token) return true;
@@ -7,20 +7,34 @@ async function ensureAuth() {
     overlay.style.display = 'flex';
     const form = document.getElementById('login-form');
     const errEl = document.getElementById('login-error');
+    const btn = document.getElementById('login-submit-btn');
+    const btnDefaultHtml = btn.innerHTML;
     form.onsubmit = async (e) => {
       e.preventDefault();
+      errEl.textContent = '';
       const pw = document.getElementById('login-password').value;
       if (!pw) return;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="ai-spinner"></span> Authenticating…';
       try {
         const body = new URLSearchParams({ username: 'admin', password: pw });
         const res = await fetch('/auth/login', { method: 'POST', body });
-        if (!res.ok) { errEl.textContent = 'Wrong password'; return; }
+        if (!res.ok) {
+          errEl.textContent = 'Wrong password';
+          btn.disabled = false;
+          btn.innerHTML = btnDefaultHtml;
+          return;
+        }
         const { access_token } = await res.json();
         _token = access_token;
-        sessionStorage.setItem('demo_token', _token);
+        localStorage.setItem('demo_token', _token);
         overlay.style.display = 'none';
         resolve(true);
-      } catch { errEl.textContent = 'Connection error'; }
+      } catch {
+        errEl.textContent = 'Connection error';
+        btn.disabled = false;
+        btn.innerHTML = btnDefaultHtml;
+      }
     };
   });
 }
@@ -29,9 +43,9 @@ const MAX_POINTS = 120;
 const taurusLatency = [];
 const maasLatency = [];
 const taurusQps = [];
-const timestamps = [];
 
 let ws = null;
+let wsDisconnectNotified = false;
 let taurusChart, maasChart, latencyChart;
 let chatHistory = [];
 let chatChartInstance = null;
@@ -46,7 +60,13 @@ function initCharts() {
       toolbar: { show: false },
       sparkline: { enabled: false },
     },
-    xaxis: { labels: { show: false }, axisTicks: { show: false }, axisBorder: { show: false } },
+    xaxis: {
+      type: 'datetime',
+      range: MAX_POINTS * 1000,
+      labels: { show: false },
+      axisTicks: { show: false },
+      axisBorder: { show: false },
+    },
     yaxis: { labels: { style: { colors: '#6b7280', fontSize: '11px' } }, tickAmount: 3 },
     grid: { borderColor: 'rgba(255,255,255,0.04)', strokeDashArray: 4 },
     stroke: { width: 2, curve: 'smooth' },
@@ -93,8 +113,8 @@ function initCharts() {
   latencyChart.render();
 }
 
-function push(arr, val) {
-  arr.push(val);
+function push(arr, x, val) {
+  arr.push({ x, y: val });
   if (arr.length > MAX_POINTS) arr.shift();
 }
 
@@ -117,15 +137,16 @@ function updateDashboard(data) {
   document.getElementById('scenario-badge').textContent = s.state || 'idle';
   document.getElementById('scenario-msg').textContent = s.message || 'Ready';
   document.getElementById('progress-fill').style.width = (s.progress || 0) + '%';
+  setActsBusy(!!s.state && s.state !== 'idle', s.state);
 
   if (data.commentary) {
     document.getElementById('ticker-text').textContent = data.commentary;
   }
 
-  push(taurusLatency, t.latency_ms || 0);
-  push(maasLatency, m.latency_ms || 0);
-  push(taurusQps, t.qps || 0);
-  push(timestamps, new Date().toLocaleTimeString());
+  const now = Date.now();
+  push(taurusLatency, now, t.latency_ms || 0);
+  push(maasLatency, now, m.latency_ms || 0);
+  push(taurusQps, now, t.qps || 0);
 
   taurusChart.updateSeries([{ data: [...taurusQps] }]);
   maasChart.updateSeries([{ data: [...maasLatency] }]);
@@ -135,18 +156,54 @@ function updateDashboard(data) {
   ]);
 }
 
+const ACT_STATE_TILE = {
+  loading: 'act-1',
+  failing_over: 'act-2',
+  ai_analyzing: 'act-3',
+};
+
+function setActsBusy(busy, activeState) {
+  document.querySelectorAll('.scenario-btn').forEach((btn) => {
+    btn.disabled = busy;
+  });
+  document.querySelectorAll('.act-tile').forEach((tile) => tile.classList.remove('active'));
+  if (busy) {
+    const activeClass = ACT_STATE_TILE[activeState];
+    if (activeClass) {
+      const tile = document.querySelector('.' + activeClass);
+      if (tile) tile.classList.add('active');
+    }
+  }
+}
+
+function showError(msg) {
+  const el = document.getElementById('error-banner');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = 'block';
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
+
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const url = _token
     ? `${proto}://${location.host}/ws?token=${_token}`
     : `${proto}://${location.host}/ws`;
   ws = new WebSocket(url);
+  ws.onopen = () => { wsDisconnectNotified = false; };
   ws.onmessage = (e) => {
     try {
       updateDashboard(JSON.parse(e.data));
     } catch {}
   };
-  ws.onclose = () => setTimeout(connectWS, 2000);
+  ws.onclose = () => {
+    if (!wsDisconnectNotified) {
+      showError('Live connection lost — reconnecting…');
+      wsDisconnectNotified = true;
+    }
+    setTimeout(connectWS, 2000);
+  };
   ws.onerror = () => ws.close();
 }
 
@@ -164,7 +221,7 @@ async function api(path, method = 'POST', body = null) {
     const res = await fetch(path, opts);
     if (res.status === 401) {
       _token = '';
-      sessionStorage.removeItem('demo_token');
+      localStorage.removeItem('demo_token');
       if (!await ensureAuth()) return null;
       return api(path, method, body);
     }
@@ -185,7 +242,7 @@ async function aiAnalyze() {
     document.getElementById('ai-result').textContent = 'Error: ' + res.error;
   }
 }
-function resetScenario() { api('/scenario/reset'); }
+function resetScenario() { api('/scenario/reset'); setActsBusy(false); }
 
 async function loadTransactions() {
   try {
@@ -201,7 +258,7 @@ async function loadTransactions() {
         <td class="${r.is_flagged ? 'flagged' : ''}">${r.is_flagged ? 'FLAGGED' : 'ok'}</td>
       </tr>
     `).join('');
-  } catch {}
+  } catch { showError('Failed to load transactions'); }
 }
 
 async function injectFraud(pattern) {
@@ -246,7 +303,7 @@ async function loadFraudAlerts() {
         </div>
       `;
     }).join('');
-  } catch {}
+  } catch { showError('Failed to load fraud alerts'); }
 }
 
 function timeSince(date) {
@@ -318,7 +375,7 @@ function renderMarkdown(text) {
   html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
   html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
   html = html.replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>');
-  html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+  html = html.replace(/(?:<li>.*?<\/li>\s*)+/gs, (match) => '<ul>' + match + '</ul>');
   html = html.replace(/<\/ul>\s*<ul>/g, '');
   html = html.replace(/\n{2,}/g, '</p><p>');
   html = html.replace(/\n/g, '<br>');

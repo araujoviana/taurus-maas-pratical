@@ -7,7 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
 ALGORITHM = "HS256"
-ACCESS_TTL = timedelta(hours=8)
+ACCESS_TTL = timedelta(days=30)
 
 security = HTTPBearer()
 

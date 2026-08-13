@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -57,17 +58,47 @@ Examples:
 - "TaurusDB is absorbing 12,400 QPS at p99 < 3ms — processing ~750M transactions/day at this rate."
 - "Connection pooling is holding steady at 47 active connections across 500k concurrent load."
 - "Standby promotion completed in 18 seconds — zero application reconnect required."
+When a scenario_message and progress are provided and a scenario is actively running, narrate that
+specific event concretely instead of generic steady-state commentary. Examples:
+- "Primary failover in progress (62%) — standby promotion detected, application traffic draining from the dead node."
+- "Bulk load in progress (34%) — 170,000 of 500,000 transactions written, QPS climbing as inserts pipeline."
 Use max_tokens=80. No tool calls needed."""
 
-REPORT_SYSTEM_PROMPT = """You are a BI analyst writing an executive report for a fintech platform.
-Given the following data sections, write 4 narrative sections:
-1. Executive Summary — overall financial health
-2. Risk Assessment — fraud and risk analysis
-3. Top Opportunities — growth areas
-4. Recommendations — actionable next steps
-
-Write in clear, professional language suitable for C-suite presentation."""
-
+REPORT_SECTION_PROMPTS = {
+    "Executive Summary": (
+        "You are a BI analyst writing the Executive Summary section of an executive report "
+        "for a fintech platform. Investigate overall financial health: revenue, transaction "
+        "volume/velocity, and account growth. You have run_sql, get_db_metrics, and "
+        "get_account_details tools — decide what queries are relevant and run them yourself "
+        "before writing. Write in clear, professional language suitable for C-suite "
+        "presentation."
+    ),
+    "Risk Assessment": (
+        "You are a BI analyst writing the Risk Assessment section of an executive report for "
+        "a fintech platform. Investigate fraud and risk exposure: query fraud_alerts (alert "
+        "types, volume, confidence) and the risk_score distribution on accounts. You have "
+        "run_sql, get_db_metrics, and get_account_details tools — decide what queries are "
+        "relevant and run them yourself before writing. Write in clear, professional language "
+        "suitable for C-suite presentation."
+    ),
+    "Top Opportunities": (
+        "You are a BI analyst writing the Top Opportunities section of an executive report "
+        "for a fintech platform. Investigate growth areas: top merchants/transaction types by "
+        "volume, and segments showing growth. You have run_sql, get_db_metrics, and "
+        "get_account_details tools — decide what queries are relevant and run them yourself "
+        "before writing. Write in clear, professional language suitable for C-suite "
+        "presentation."
+    ),
+    "Recommendations": (
+        "You are a BI analyst writing the Recommendations section of an executive report for "
+        "a fintech platform. Synthesize 3-5 actionable next steps based on typical fintech "
+        "platform risk/growth tradeoffs. This section is primarily synthesis, not fresh "
+        "investigation — you have run_sql, get_db_metrics, and get_account_details tools "
+        "available if a quick check would sharpen a recommendation, but you do not need to "
+        "query extensively. Write in clear, professional language suitable for C-suite "
+        "presentation."
+    ),
+}
 
 TOOL_DEFINITIONS = [
     {
@@ -142,6 +173,10 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+]
+
+REPORT_TOOL_DEFINITIONS = [
+    t for t in TOOL_DEFINITIONS if t["function"]["name"] != "flag_transaction"
 ]
 
 
@@ -265,7 +300,21 @@ class MaaSClient:
 
             for tc in choice.message.tool_calls:
                 tool_calls_made.append(tc.function.name)
-                args = json.loads(tc.function.arguments)
+                try:
+                    args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": json.dumps(
+                                {
+                                    "error": "Malformed tool arguments, please retry with valid JSON"
+                                }
+                            ),
+                        }
+                    )
+                    continue
                 result = await self._execute_tool(tc.function.name, args)
                 messages.append(
                     {"role": "tool", "tool_call_id": tc.id, "content": result}
@@ -360,76 +409,45 @@ class MaaSClient:
             "alerts": alerts,
         }
 
+    async def _generate_report_section(self, title: str) -> dict:
+        try:
+            section_prompt = REPORT_SECTION_PROMPTS[title]
+            messages = [
+                {"role": "system", "content": section_prompt},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Write the '{title}' section of an executive report for this "
+                        "fintech platform. Investigate the database as needed using your "
+                        "tools, then write 2-4 professional paragraphs suitable for a "
+                        "C-suite reader. Do not include the section title in your response, "
+                        "just the body text."
+                    ),
+                },
+            ]
+            result = await self._run_tool_loop(messages, tools=REPORT_TOOL_DEFINITIONS)
+            return {"title": title, "content": result["content"]}
+        except Exception:
+            return {"title": title, "content": "Unable to generate this section."}
+
     async def generate_report(self) -> dict:
-        queries = {
-            "total_revenue": "SELECT COALESCE(SUM(amount),0) as total FROM transactions WHERE tx_type='credit'",
-            "top_merchants": "SELECT description, COUNT(*) as cnt, SUM(amount) as vol FROM transactions GROUP BY description ORDER BY vol DESC LIMIT 5",
-            "risk_distribution": "SELECT CASE WHEN risk_score<=3 THEN 'low' WHEN risk_score<=6 THEN 'mid' ELSE 'high' END as bucket, COUNT(*) as cnt FROM accounts GROUP BY bucket",
-            "tx_by_type": "SELECT tx_type, COUNT(*) as cnt, SUM(amount) as total FROM transactions GROUP BY tx_type",
-            "flagged_rate": "SELECT HOUR(created_at) as hr, COUNT(*) as total, SUM(is_flagged) as flagged FROM transactions WHERE created_at >= NOW() - INTERVAL 24 HOUR GROUP BY hr ORDER BY hr",
-            "fraud_summary": "SELECT alert_type, COUNT(*) as cnt FROM fraud_alerts GROUP BY alert_type",
-        }
-        data: dict[str, Any] = {}
-        for key, sql in queries.items():
-            try:
-                data[key] = await self._db.fetchall(sql)
-            except Exception as e:
-                data[key] = {"error": str(e)}
-
-        data_str = json.dumps(data, indent=2, default=str)
-        messages = [
-            {"role": "system", "content": REPORT_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"Here is the data for the executive report:\n\n{data_str}\n\n"
-                "Write 4 sections: Executive Summary, Risk Assessment, Top Opportunities, Recommendations.",
-            },
-        ]
-        response = await self._client.chat.completions.create(
-            model=self._model,
-            messages=messages,
-            max_tokens=2000,
-            temperature=0.4,
+        titles = list(REPORT_SECTION_PROMPTS.keys())
+        sections = await asyncio.gather(
+            *[self._generate_report_section(title) for title in titles]
         )
-        narrative = response.choices[0].message.content or ""
-
-        sections = []
-        for heading in [
-            "Executive Summary",
-            "Risk Assessment",
-            "Top Opportunities",
-            "Recommendations",
-        ]:
-            idx = narrative.find(heading)
-            if idx != -1:
-                next_headings = [
-                    narrative.find(h, idx + 1)
-                    for h in [
-                        "Executive Summary",
-                        "Risk Assessment",
-                        "Top Opportunities",
-                        "Recommendations",
-                    ]
-                    if narrative.find(h, idx + 1) > idx
-                ]
-                end = min(next_headings) if next_headings else len(narrative)
-                content = (
-                    narrative[idx + len(heading) : end].strip().lstrip(":").strip()
-                )
-                sections.append({"title": heading, "content": content})
-
-        if not sections:
-            sections = [{"title": "Report", "content": narrative}]
 
         return {
-            "sections": sections,
+            "sections": list(sections),
             "generated_at": time.time(),
-            "data": data,
         }
 
     async def get_commentary(self, metrics_snapshot: dict) -> str:
         now = time.time()
-        if now - self._commentary_ts < 25 and self._cached_commentary:
+        # Scenario-aware cache TTL: refresh quickly while a scenario is actively
+        # running (near-real-time narration during Act 1/2), fall back to a
+        # longer cache at idle to control MaaS API cost when nothing's happening.
+        ttl = 6 if metrics_snapshot.get("scenario_state", "idle") != "idle" else 25
+        if now - self._commentary_ts < ttl and self._cached_commentary:
             return self._cached_commentary
 
         prompt = (
@@ -437,7 +455,9 @@ class MaaSClient:
             f"latency_ms={metrics_snapshot.get('latency_ms',0)}, "
             f"connections={metrics_snapshot.get('connections',0)}, "
             f"slow_queries={metrics_snapshot.get('slow_queries',0)}, "
-            f"scenario={metrics_snapshot.get('scenario_state','idle')}"
+            f"scenario={metrics_snapshot.get('scenario_state','idle')}, "
+            f"scenario_message='{metrics_snapshot.get('scenario_message','')}', "
+            f"progress={metrics_snapshot.get('scenario_progress',0):.0f}%"
         )
         try:
             response = await self._client.chat.completions.create(

@@ -395,11 +395,39 @@ main {
   gap: 0.75rem;
 }
 
+.section-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 0.6rem;
+}
+
 .acts-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 0.875rem;
   margin-bottom: 1rem;
+}
+
+.act-tile.active {
+  transform: translateY(-1px);
+}
+
+.act-1.active {
+  border-color: rgba(129,140,248,0.55);
+  box-shadow: 0 0 0 1px rgba(129,140,248,0.4), 0 0 24px -6px var(--accent);
+}
+
+.act-2.active {
+  border-color: rgba(248,113,113,0.55);
+  box-shadow: 0 0 0 1px rgba(248,113,113,0.4), 0 0 24px -6px var(--danger);
+}
+
+.act-3.active {
+  border-color: rgba(34,211,238,0.55);
+  box-shadow: 0 0 0 1px rgba(34,211,238,0.4), 0 0 24px -6px var(--cyan);
 }
 
 .act-tile {
@@ -480,21 +508,18 @@ main {
 /* Fraud Row */
 .fraud-row {
   display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-top: 0.75rem;
-  padding-top: 0.875rem;
-  border-top: 1px solid var(--border);
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  margin-top: 0.875rem;
+  padding: 0.875rem 1rem;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border-hard);
+  border-radius: var(--radius-sm);
 }
 
-.row-label {
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  flex-shrink: 0;
+.fraud-row .section-label {
+  margin-bottom: 0.65rem;
 }
 
 /* Progress Bar */
@@ -568,6 +593,18 @@ main {
 }
 
 .btn:active { transform: scale(0.97); }
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn:disabled:hover {
+  border-color: var(--border-hard);
+  color: inherit;
+  background: rgba(255,255,255,0.04);
+}
 
 .btn.primary, .btn.act-btn.primary {
   background: var(--accent);
@@ -878,6 +915,8 @@ tr:hover td { background: rgba(129,140,248,0.04); }
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .chat-msg {
@@ -886,6 +925,8 @@ tr:hover td { background: rgba(129,140,248,0.04); }
   font-size: 0.83rem;
   line-height: 1.55;
   animation: alert-in 0.2s ease-out;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .chat-msg.user {
@@ -1199,12 +1240,45 @@ tr:hover td { background: rgba(129,140,248,0.04); }
 
 .login-btn:hover { opacity: 0.9; color: #fff; border-color: transparent; background: linear-gradient(135deg, var(--accent), #6d78f0); }
 .login-btn:active { transform: scale(0.98); }
+.login-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
 
 .login-error {
   color: var(--danger);
   font-size: 0.78rem;
   margin-top: 0.75rem;
   min-height: 1.2em;
+}
+
+/* Error Banner */
+.error-banner {
+  display: none;
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  background: var(--danger-dim);
+  border: 1px solid rgba(248,113,113,0.35);
+  color: var(--danger);
+  padding: 0.55rem 1.25rem;
+  border-radius: 100px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  box-shadow: 0 8px 30px -8px rgba(0,0,0,0.6);
+  animation: banner-in 0.25s ease-out;
+  backdrop-filter: blur(10px);
+}
+
+@keyframes banner-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 /* Responsive */
@@ -1222,4 +1296,88 @@ tr:hover td { background: rgba(129,140,248,0.04); }
   .modal { margin: 1rem; padding: 1.25rem; }
   header { padding: 0.75rem 1rem; }
   .header-center { display: none; }
+}
+
+/* Print — Executive Report export */
+@media print {
+  /* Hide all dashboard chrome; only the report modal content should print */
+  header,
+  .commentary-ticker,
+  .kpi-strip,
+  main,
+  .login-overlay,
+  .error-banner,
+  .modal-actions {
+    display: none !important;
+  }
+
+  html, body {
+    background: #fff !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Let the modal flow normally so the print engine can paginate it,
+     instead of clipping it to viewport height like the on-screen version. */
+  .modal-overlay {
+    display: block !important;
+    position: static !important;
+    inset: auto !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    padding: 0 !important;
+    z-index: auto !important;
+  }
+
+  .modal {
+    position: static !important;
+    max-width: none !important;
+    width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: #fff !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .modal-header {
+    border-bottom: 1px solid #ccc !important;
+    margin-bottom: 1rem !important;
+    padding-bottom: 0.5rem !important;
+  }
+
+  .modal-header h2 {
+    color: #111 !important;
+  }
+
+  .modal-body {
+    color: #111 !important;
+  }
+
+  .report-ts {
+    color: #555 !important;
+    font-size: 9pt !important;
+  }
+
+  .report-section {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    margin-bottom: 1.25rem !important;
+  }
+
+  .report-section h3 {
+    color: #2b2f77 !important;
+    font-size: 14pt !important;
+    border-bottom: 1px solid #ccc !important;
+  }
+
+  .report-section p {
+    color: #111 !important;
+    font-size: 11pt !important;
+    line-height: 1.6 !important;
+  }
 }

@@ -13,6 +13,7 @@
   <div class="bg-grid"></div>
   <div class="bg-glow-tl"></div>
   <div class="bg-glow-tr"></div>
+  <div class="error-banner" id="error-banner"></div>
 
   <header>
     <div class="header-brand">
@@ -104,13 +105,14 @@
         </div>
       </div>
 
+      <div class="section-label">Demo Flow</div>
       <div class="acts-grid">
         <div class="act-tile act-1">
           <div class="act-num">01</div>
           <div class="act-body">
             <div class="act-name">Performance Storm</div>
             <div class="act-desc">Bulk-load 500k transactions and observe live QPS spikes and latency distribution</div>
-            <button class="btn act-btn primary" onclick="startLoad()">
+            <button class="btn act-btn primary scenario-btn" onclick="startLoad()">
               <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
               Start Load Test
             </button>
@@ -122,7 +124,7 @@
           <div class="act-body">
             <div class="act-name">HA Resilience</div>
             <div class="act-desc">Trigger primary→standby switchover, observe sub-30s recovery through the proxy</div>
-            <button class="btn act-btn danger-btn" onclick="killPrimary()">
+            <button class="btn act-btn danger-btn scenario-btn" onclick="killPrimary()">
               <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
               Kill Primary
             </button>
@@ -134,7 +136,7 @@
           <div class="act-body">
             <div class="act-name">AI Intelligence</div>
             <div class="act-desc">GLM-5.1 fraud pattern analysis, high-risk account escalation and AI commentary</div>
-            <button class="btn act-btn cyan-btn" onclick="aiAnalyze()">
+            <button class="btn act-btn cyan-btn scenario-btn" onclick="aiAnalyze()">
               <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 14.93V15a1 1 0 0 0-2 0v1.93A8 8 0 0 1 4.07 11H6a1 1 0 0 0 0-2H4.07A8 8 0 0 1 11 4.07V6a1 1 0 0 0 2 0V4.07A8 8 0 0 1 19.93 11H18a1 1 0 0 0 0 2h1.93A8 8 0 0 1 13 16.93z"/></svg>
               Run AI Analysis
             </button>
@@ -145,12 +147,24 @@
       <div class="progress-bar"><div class="fill" id="progress-fill" style="width:0%"></div></div>
 
       <div class="fraud-row">
-        <span class="row-label">Fraud Injection</span>
+        <div class="section-label">Fraud Injection</div>
         <div class="actions">
-          <button class="btn warning small" onclick="injectFraud('velocity')">⚡ Velocity</button>
-          <button class="btn warning small" onclick="injectFraud('large_transfer')">💸 Large Transfer</button>
-          <button class="btn warning small" onclick="injectFraud('geo_anomaly')">📍 Geo Anomaly</button>
-          <button class="btn cyan-outline small" onclick="runFraudAnalysis()">◆ Run AI Detection</button>
+          <button class="btn warning small scenario-btn" onclick="injectFraud('velocity')">
+            <svg width="13" height="13" fill="currentColor" viewBox="0 0 24 24"><path d="M13 2 3 14h8l-1 8 10-12h-8z"/></svg>
+            Velocity
+          </button>
+          <button class="btn warning small scenario-btn" onclick="injectFraud('large_transfer')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>
+            Large Transfer
+          </button>
+          <button class="btn warning small scenario-btn" onclick="injectFraud('geo_anomaly')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="2.5"/></svg>
+            Geo Anomaly
+          </button>
+          <button class="btn cyan-outline small scenario-btn" onclick="runFraudAnalysis()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Run AI Detection
+          </button>
         </div>
       </div>
     </div>
@@ -233,7 +247,7 @@
     <div class="modal">
       <div class="modal-header">
         <h2>Executive Report</h2>
-        <div>
+        <div class="modal-actions">
           <button class="btn small" onclick="window.print()">Print / PDF</button>
           <button class="btn small" onclick="closeReportModal()">✕ Close</button>
         </div>
@@ -269,7 +283,7 @@
           <svg class="login-field-icon" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
           <input type="password" id="login-password" placeholder="Enter demo password" autofocus>
         </div>
-        <button type="submit" class="btn login-btn">Authenticate</button>
+        <button type="submit" class="btn login-btn" id="login-submit-btn">Authenticate</button>
         <div class="login-error" id="login-error"></div>
       </form>
     </div>
