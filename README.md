@@ -1,212 +1,108 @@
-# TaurusDB + MaaS AI — Fintech Demo Dashboard
+# TaurusDB + MaaS AI — Fintech Demo
 
-A live demo environment showcasing **Huawei Cloud GaussDB for MySQL (TaurusDB)** integrated with **MaaS AI (GLM-5.1)** in a fintech scenario. Designed as a ~20-minute enterprise presentation across three acts.
+FastAPI + WebSocket dashboard driving a scripted ~20-min demo: bulk workload → HA failover → AI fraud analysis, against a real TaurusDB (GaussDB for MySQL) HA instance and GLM-5.1 via MaaS AI.
 
----
-
-## Demo Overview
-
-| Act | Scenario | What it shows |
-|-----|----------|---------------|
-| **Act 1 — Performance Storm** | Bulk-load 500k transactions | Live QPS/latency spike on the dashboard |
-| **Act 2 — HA Resilience** | Trigger a primary→standby switchover | Sub-30s automatic failover through TaurusDB proxy |
-| **Act 3 — MaaS AI Integration** | GLM-5.1 fraud pattern analysis | AI-driven risk scoring against live fintech data |
-
-The dashboard runs on **FastAPI + WebSocket** (port 8000), served via nginx reverse proxy. No local port-forwarding needed — the presenter opens a browser to the ECS public IP.
-
----
-
-## Architecture
-
-```
-Browser
-  │  HTTP/WebSocket
-  ▼
-nginx (port 80)
-  │  reverse proxy
-  ▼
-FastAPI app (port 8000)
-  ├── /ws  ─────────────────► TaurusDBCollector (SHOW GLOBAL STATUS + SELECT 1 latency)
-  │                          MAASCollector      (GLM-5.1 ping, 30s cache)
-  ├── /scenario/start-load ──► workload.py      (Faker bulk insert)
-  ├── /scenario/kill-primary ► failover.py      (Huawei Cloud GaussDB switchover API)
-  ├── /scenario/ai-analyze ──► ai_analytics.py  (GLM-5.1 fraud analysis)
-  └── /auth/login ───────────► auth.py          (JWT HS256, 8h TTL)
-        │
-        ▼
-  TaurusDB Proxy ──► Primary / Standby (GaussDB MySQL HA)
-```
-
----
-
-## Prerequisites
-
-| Tool | Version | Notes |
-|------|---------|-------|
-| [uv](https://docs.astral.sh/uv/) | latest | Python package manager |
-| [Terraform](https://developer.hashicorp.com/terraform/install) | >= 1.5 | Infrastructure provisioning |
-| [Ansible](https://docs.ansible.com/ansible/latest/installation_guide/) | >= 2.15 | App deployment |
-| Huawei Cloud account | — | ECS + GaussDB MySQL + MaaS AI access |
-
----
-
-## Quick Start
-
-### 1. Clone and install dependencies
+## Quick start
 
 ```bash
-git clone https://github.com/araujoviana/taurus-maas-pratical.git
+git clone git@github.com:araujoviana/taurus-maas-pratical.git
 cd taurus-maas-pratical
 uv sync
-make hooks   # enable pre-commit/pre-push secret-scanning (see Security Notes)
+make hooks    # secret-scanning pre-commit/pre-push (once per clone)
+
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars   # HW AK/SK, project ID, SSH key path
+cp .env.example .env                                                # HW_*, MAAS_API_KEY, DEMO_PASSWORD
+
+make up       # terraform apply -> gen_inventory.py -> ansible-playbook, ~15 min
 ```
 
-### 2. Configure credentials
+Prints `Dashboard: http://<demo_runner_public_ip>` on completion. Login `admin` / `$DEMO_PASSWORD`.
+
+Requires: `uv`, `terraform` >= 1.5, `ansible` >= 2.15, a Huawei Cloud account with ECS + GaussDB MySQL + MaaS AI access, an SSH keypair.
+
+## Local dev (no cloud infra)
 
 ```bash
-# Terraform variables
-cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-# Edit terraform/terraform.tfvars — fill in your Huawei Cloud AK, SK, project ID, SSH key path
-
-# App environment
-cp .env.example .env
-# Edit .env — fill in HW_ACCESS_KEY, HW_SECRET_KEY, HW_PROJECT_ID, MAAS_API_KEY, DEMO_PASSWORD
-```
-
-### 3. Provision infrastructure and deploy
-
-```bash
-make up
-```
-
-This runs three steps automatically:
-1. `terraform apply` — creates VPC, ECS, EIP, TaurusDB HA instance + proxy
-2. `scripts/gen_inventory.py` — bridges Terraform outputs into `ansible/inventory.ini` and patches `.env`
-3. `ansible-playbook` — installs system deps, deploys the app, seeds the database
-
-Takes ~15 minutes on first run.
-
-### 4. Open the dashboard
-
-After `make up` completes, the URL is printed:
-
-```
-Dashboard: http://<YOUR_ECS_PUBLIC_IP>
-Login: admin / <YOUR_DEMO_PASSWORD>
-```
-
----
-
-## Environment Variables
-
-See [`.env.example`](.env.example) for the full list. Key variables:
-
-| Variable | Description | Source |
-|----------|-------------|--------|
-| `HW_ACCESS_KEY` | Huawei Cloud Access Key | Manual |
-| `HW_SECRET_KEY` | Huawei Cloud Secret Key | Manual |
-| `HW_PROJECT_ID` | Huawei Cloud Project ID | Manual |
-| `DEMO_PASSWORD` | TaurusDB password + JWT secret seed | Manual |
-| `MAAS_API_KEY` | MaaS AI (GLM-5.1) API key | Manual |
-| `MAAS_BASE_URL` | MaaS AI endpoint URL | Manual |
-| `TAURUS_HOST` | TaurusDB proxy private IP | Auto-filled by `gen_inventory.py` |
-| `TAURUS_INSTANCE_ID` | GaussDB instance ID (for failover API) | Auto-filled by `gen_inventory.py` |
-| `DEMO_RUNNER_IP` | ECS public IP | Auto-filled by `gen_inventory.py` |
-
-> Variables marked **Auto-filled** are overwritten on every `make up`. Do not edit them manually.
-
----
-
-## Local Development
-
-Run the app locally without any cloud infrastructure. The DB connection will fail, but the app starts and the WebSocket/UI work:
-
-```bash
-uv run python main.py
-# Dashboard at http://localhost:8000
-```
-
-Run tests:
-
-```bash
+uv run python main.py     # http://localhost:8000 — DB connect fails silently, UI/WS still serve
 uv run pytest tests/ -v
 ```
 
----
+## Running the demo
 
-## Other Make Targets
+Each act is a POST from the dashboard buttons; state lives in `ScenarioManager` (`dashboard/scenarios.py`), which enforces one scenario at a time.
+
+| Route | Handler | Does |
+|---|---|---|
+| `POST /scenario/start-load` | `scenarios/workload.py` | Faker bulk insert (200 accounts, 10k txns) — QPS spike on the dashboard |
+| `POST /scenario/kill-primary` | `scenarios/failover.py` | GaussDB MySQL switchover REST API call, polls `SELECT 1` until recovered (<30s) |
+| `POST /scenario/ai-analyze` | `scenarios/ai_analytics.py` | One-shot GLM-5.1 fraud pass over recent + sampled transactions; escalates `risk_score >= 7` to 10 |
+| `POST /scenario/reset` | — | Clears `ScenarioManager` state back to `IDLE` |
+| `POST /fraud/inject/{pattern}` | `scenarios/fraud_injection.py` | Synthesizes obviously-fraudulent rows (`velocity` \| `large_transfer` \| `geo_anomaly`) for detection to find — not AI-driven |
+| `POST /fraud/analyze` | `dashboard/ai_engine.py` | Tool-calling agent hunts + flags fraud over the last 30 min |
+| `POST /ai/chat` | `dashboard/ai_engine.py` | Conversational SQL Q&A with chart generation (chat panel) |
+| `GET /ai/report` | `dashboard/ai_engine.py` | Executive report from six canned aggregate queries |
+| `GET /ai/commentary` | `dashboard/ai_engine.py` | 25s-cached one-liner for the dashboard ticker |
+| `GET /db/stats`, `/accounts`, `/transactions`, `/scenario/status`, `/fraud/alerts` | — | Read-only polling endpoints backing the UI |
+
+The AI tool-calling agent (`MaaSClient`) exposes 4 tools to the model: `run_sql` (SELECT-only, `_validate_sql` guarded), `get_db_metrics`, `flag_transaction`, `get_account_details`.
+
+## Environment variables
+
+Full list in `.env.example`. You supply manually:
+
+| Variable | Used for |
+|---|---|
+| `HW_ACCESS_KEY`, `HW_SECRET_KEY`, `HW_PROJECT_ID` | AKSK signing for the GaussDB switchover API |
+| `DEMO_PASSWORD` | TaurusDB `demouser` password + JWT secret seed (HS256, 8h TTL) |
+| `MAAS_API_KEY`, `MAAS_BASE_URL`, `MAAS_MODEL` | GLM-5.1 via `openai.OpenAI`/`AsyncOpenAI` clients |
+| `SSH_KEY_PATH` | Ansible's private key for the ECS host (pairs with `ssh_public_key_path` in `terraform.tfvars`) |
+
+Auto-filled by `scripts/gen_inventory.py` after `terraform apply` — don't hand-edit, overwritten on every `make up`:
+
+| Variable | Source |
+|---|---|
+| `TAURUS_HOST` | GaussDB MySQL proxy endpoint |
+| `TAURUS_INSTANCE_ID` | Needed for the failover API call |
+| `DEMO_RUNNER_IP` | ECS public IP |
+
+## Make targets
 
 ```bash
-make seed   # Re-seed the database (10k accounts + 500k transactions)
-make logs   # Stream live app logs from ECS
-make down   # Tear down all Terraform-managed infrastructure
+make up      # terraform apply + gen_inventory.py + ansible-playbook
+make seed    # re-seed: 10k accounts + 500k transactions (scripts/seed_data.py)
+make logs    # journalctl -u taurus-demo -f, via ansible
+make down    # terraform destroy
+make hooks   # point core.hooksPath at .githooks/ (secret scanning)
 ```
 
----
+`scripts/bulk_populate.py` adds 40k accounts + 4.5M transactions on top of an existing seed — run manually, not wired into `make`/ansible.
 
-## Project Structure
+## Project structure
 
 ```
-main.py                     # Local dev entry point (uvicorn with reload)
-Makefile                    # Deployment lifecycle: up / down / seed / logs
-pyproject.toml              # uv-managed dependencies
+main.py                      # local dev entry (uvicorn --reload)
 
 dashboard/
-  main.py                   # FastAPI app — WebSocket, scenario routes, auth
-  collectors.py             # TaurusDBCollector + MAASCollector (metrics)
-  scenarios.py              # ScenarioManager async state machine
-  database.py               # aiomysql connection pool + schema helpers
-  auth.py                   # JWT creation/verification
-  static/
-    index.html              # Dark fintech dashboard (ApexCharts)
-    app.js                  # WebSocket client + chart updates
-    style.css               # Dark enterprise theme
+  main.py                    # FastAPI app: routes above, WebSocket /ws
+  collectors.py               # TaurusDBCollector (QPS delta, latency) + MAASCollector (30s cache)
+  scenarios.py                 # ScenarioManager state machine
+  database.py                  # aiomysql pool + schema
+  auth.py                      # JWT create/verify
+  ai_engine.py                  # MaaSClient — tool-calling agent (chat/report/commentary/fraud)
+  static/                       # index.html + app.js (ApexCharts) + style.css
 
-scenarios/
-  workload.py               # Faker-based bulk insert (Act 1)
-  failover.py               # GaussDB MySQL switchover via Huawei Cloud API (Act 2)
-  ai_analytics.py           # GLM-5.1 fraud pattern analysis (Act 3)
-
-scripts/
-  gen_inventory.py          # Bridges terraform output → inventory.ini + .env
-  seed_data.py              # CLI: full 10k accounts + 500k transactions seed
-
-terraform/
-  main.tf                   # VPC, ECS, EIP, TaurusDB HA instance + proxy
-  variables.tf              # All configurable inputs
-  outputs.tf                # Exported: taurus_host, taurus_port, demo_runner_public_ip
-  terraform.tfvars.example  # Template — copy to terraform.tfvars and fill in
-
-ansible/
-  site.yml                  # 3 plays: system setup → app deploy → verify
-  inventory.ini             # Auto-generated by gen_inventory.py (gitignored)
-  templates/
-    taurus-demo.service.j2  # systemd unit (uvicorn on port 8000)
-    nginx.conf.j2           # Reverse proxy + WebSocket upgrade
-
-tests/
-  test_collectors.py        # TaurusDBCollector QPS rate + MAASCollector cache
-  test_scenarios.py         # ScenarioManager state machine transitions
-  test_auth.py              # JWT create + verify
+scenarios/                     # workload.py, failover.py, ai_analytics.py, fraud_injection.py
+scripts/                       # gen_inventory.py, seed_data.py, bulk_populate.py
+terraform/                     # VPC, ECS, EIP, TaurusDB HA instance + proxy
+ansible/                       # site.yml (setup, deploy+seed, verify) + templates/
+tests/                         # one file per dashboard module
 ```
 
----
+Full architecture notes (metrics pipeline, failover mechanism, asyncio executor gotchas, live ECS deployment reference) are in `CLAUDE.md`.
 
-## Pre-Demo Checklist
+## Security notes
 
-- [ ] `terraform/terraform.tfvars` created from `.example` with real credentials
-- [ ] `.env` has `HW_ACCESS_KEY`, `HW_SECRET_KEY`, `HW_PROJECT_ID`, `MAAS_API_KEY` filled
-- [ ] SSH key pair present: public key path in `terraform.tfvars`, private key at `SSH_KEY_PATH`
-- [ ] `make up` completed successfully (~15 min)
-- [ ] Dashboard accessible at `http://<ECS_IP>` → login works
-- [ ] Browser devtools → WebSocket frames arriving every ~1s
-- [ ] All 3 acts rehearsed end-to-end
-
----
-
-## Security Notes
-
-- **Never commit `.env` or `terraform/terraform.tfvars`** — both are gitignored.
-- `DEMO_PASSWORD` is used as the TaurusDB password, the nginx admin password, and the JWT secret seed. Use a strong value in production.
-- The ECS root password auth is convenient for demos; for real deployments use SSH key auth and disable password login.
-- **Secret-scanning git hooks**: run `make hooks` once per clone to enable `pre-commit`/`pre-push` hooks (in `.githooks/`) that block commits/pushes containing credential-shaped filenames (`.env`, `*.pem`, `id_rsa`, `terraform.tfvars`, …) or content (private keys, AWS-style access keys, hardcoded passwords/tokens). This is defense-in-depth on top of `.gitignore` — it also catches force-added (`git add -f`) files.
+- `.env` and `terraform/terraform.tfvars` are gitignored — never commit them.
+- `make hooks` installs pre-commit/pre-push hooks (`.githooks/`) that block commits/pushes containing credential-shaped filenames or content (private keys, AK/SK-style keys, hardcoded passwords), including force-added files. Defense-in-depth on top of `.gitignore`.
+- App auth is JWT-only (login overlay, `sessionStorage` token) — there is no nginx basic auth in front of it.
+- ECS root password auth is fine for a demo box; use SSH keys + disabled password login for anything longer-lived.
