@@ -22,16 +22,16 @@ def _ac(coro, loop):
     return asyncio.run_coroutine_threadsafe(coro, loop).result()
 
 
-def _get_loop():
-    return asyncio.get_event_loop()
-
-
-def inject_velocity(db: Any, env: dict[str, str]) -> dict[str, Any]:
-    loop = _get_loop()
-
+def inject_velocity(
+    db: Any, env: dict[str, str], loop: asyncio.AbstractEventLoop
+) -> dict[str, Any]:
     accounts = _ac(db.fetchall("SELECT id FROM accounts ORDER BY RAND() LIMIT 1"), loop)
     if not accounts:
-        return {"injected": 0, "description": VELOCITY_DESCRIPTION, "error": "No accounts found"}
+        return {
+            "injected": 0,
+            "description": VELOCITY_DESCRIPTION,
+            "error": "No accounts found",
+        }
 
     account_id = accounts[0]["id"]
     count = 50
@@ -60,23 +60,44 @@ def inject_velocity(db: Any, env: dict[str, str]) -> dict[str, Any]:
         loop,
     )
 
-    return {"injected": count, "description": VELOCITY_DESCRIPTION, "account_id": account_id}
+    return {
+        "injected": count,
+        "description": VELOCITY_DESCRIPTION,
+        "account_id": account_id,
+    }
 
 
-def inject_large_transfer(db: Any, env: dict[str, str]) -> dict[str, Any]:
-    loop = _get_loop()
-
-    accounts = _ac(db.fetchall("SELECT id FROM accounts WHERE balance > 500000 ORDER BY RAND() LIMIT 1"), loop)
+def inject_large_transfer(
+    db: Any, env: dict[str, str], loop: asyncio.AbstractEventLoop
+) -> dict[str, Any]:
+    accounts = _ac(
+        db.fetchall(
+            "SELECT id FROM accounts WHERE balance > 500000 ORDER BY RAND() LIMIT 1"
+        ),
+        loop,
+    )
     if not accounts:
-        accounts = _ac(db.fetchall("SELECT id FROM accounts ORDER BY RAND() LIMIT 1"), loop)
+        accounts = _ac(
+            db.fetchall("SELECT id FROM accounts ORDER BY RAND() LIMIT 1"), loop
+        )
     if not accounts:
-        return {"injected": 0, "description": LARGE_TRANSFER_DESCRIPTION, "error": "No accounts found"}
+        return {
+            "injected": 0,
+            "description": LARGE_TRANSFER_DESCRIPTION,
+            "error": "No accounts found",
+        }
 
     account_id = accounts[0]["id"]
     _ac(
         db.execute(
             "INSERT INTO transactions (account_id, amount, tx_type, description, is_flagged) VALUES (%s,%s,%s,%s,%s)",
-            (account_id, 480000.00, "transfer", "Large wire transfer - suspicious", True),
+            (
+                account_id,
+                480000.00,
+                "transfer",
+                "Large wire transfer - suspicious",
+                True,
+            ),
         ),
         loop,
     )
@@ -90,15 +111,23 @@ def inject_large_transfer(db: Any, env: dict[str, str]) -> dict[str, Any]:
         loop,
     )
 
-    return {"injected": 1, "description": LARGE_TRANSFER_DESCRIPTION, "account_id": account_id}
+    return {
+        "injected": 1,
+        "description": LARGE_TRANSFER_DESCRIPTION,
+        "account_id": account_id,
+    }
 
 
-def inject_geo_anomaly(db: Any, env: dict[str, str]) -> dict[str, Any]:
-    loop = _get_loop()
-
+def inject_geo_anomaly(
+    db: Any, env: dict[str, str], loop: asyncio.AbstractEventLoop
+) -> dict[str, Any]:
     accounts = _ac(db.fetchall("SELECT id FROM accounts ORDER BY RAND() LIMIT 1"), loop)
     if not accounts:
-        return {"injected": 0, "description": GEO_ANOMALY_DESCRIPTION, "error": "No accounts found"}
+        return {
+            "injected": 0,
+            "description": GEO_ANOMALY_DESCRIPTION,
+            "error": "No accounts found",
+        }
 
     account_id = accounts[0]["id"]
     rows = []
@@ -125,7 +154,11 @@ def inject_geo_anomaly(db: Any, env: dict[str, str]) -> dict[str, Any]:
         loop,
     )
 
-    return {"injected": len(rows), "description": GEO_ANOMALY_DESCRIPTION, "account_id": account_id}
+    return {
+        "injected": len(rows),
+        "description": GEO_ANOMALY_DESCRIPTION,
+        "account_id": account_id,
+    }
 
 
 PATTERNS = {

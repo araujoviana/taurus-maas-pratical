@@ -37,10 +37,14 @@ dev = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 
+[tool.black]
+target-version = ["py311"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.25.0",
     "pytest-mock>=3.14.0",
     "httpx>=0.28.0",
+    "black>=26.5.1",
 ]

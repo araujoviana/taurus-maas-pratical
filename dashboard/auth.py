@@ -39,4 +39,5 @@ def verify_token(
 def auth_dependency(secret: str):
     def _dep(creds: HTTPAuthorizationCredentials = Depends(security)):
         return verify_token(creds, secret)
+
     return _dep

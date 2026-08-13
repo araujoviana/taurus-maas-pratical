@@ -53,7 +53,7 @@
   tasks:
     - name: Sync project files to /opt/taurus-demo/
       synchronize:
-        src: /mnt/storage/Projetos/python-projs/taurus-maas-pratical/
+        src: "{{ playbook_dir }}/../"
         dest: /opt/taurus-demo/
         rsync_opts:
           - "--exclude=.venv"
@@ -65,7 +65,7 @@
 
     - name: Upload .env file
       copy:
-        src: /mnt/storage/Projetos/python-projs/taurus-maas-pratical/.env
+        src: "{{ playbook_dir }}/../.env"
         dest: /opt/taurus-demo/.env
         mode: '0600'
 
@@ -80,19 +80,6 @@
         executable: /bin/bash
       timeout: 300
       ignore_errors: yes
-
-    - name: Read DEMO_PASSWORD from .env
-      shell: grep '^DEMO_PASSWORD=' /opt/taurus-demo/.env | cut -d= -f2-
-      register: demo_pw
-      no_log: true
-
-    - name: Configure nginx htpasswd (password via stdin — not exposed in process list)
-      shell: printf '%s\n' "$HTPASSWD_PW" | htpasswd -i -c /etc/nginx/.htpasswd admin
-      args:
-        executable: /bin/bash
-      environment:
-        HTPASSWD_PW: "{{ demo_pw.stdout }}"
-      no_log: true
 
     - name: Install systemd service
       template:
@@ -147,4 +134,4 @@
     - name: Check HTTP via nginx
       uri:
         url: http://localhost/
-        status_code: 401
+        status_code: 200

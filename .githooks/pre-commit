@@ -1,0 +1,5 @@
+#!/bin/sh
+# Blocks commits that add credentials or sensitive files.
+# Installed via `make hooks` (sets core.hooksPath to .githooks).
+repo_root=$(git rev-parse --show-toplevel) || exit 1
+git diff --cached | python3 "$repo_root/.githooks/check_secrets.py"

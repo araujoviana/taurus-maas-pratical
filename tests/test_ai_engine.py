@@ -13,11 +13,13 @@ def _mock_db():
     db.fetchall = AsyncMock(return_value=[])
     db.fetchone = AsyncMock(return_value=None)
     db.execute = AsyncMock(return_value=1)
-    db.status = AsyncMock(return_value={
-        "threads_connected": 5,
-        "queries_per_second": 1000,
-        "slow_queries": 2,
-    })
+    db.status = AsyncMock(
+        return_value={
+            "threads_connected": 5,
+            "queries_per_second": 1000,
+            "slow_queries": 2,
+        }
+    )
     return db
 
 
@@ -80,6 +82,11 @@ def test_validate_sql_rejects_drop():
         _validate_sql("DROP TABLE accounts")
 
 
+def test_validate_sql_rejects_smuggled_statement():
+    with pytest.raises(ValueError, match="forbidden keywords"):
+        _validate_sql("SELECT * FROM accounts; DROP TABLE accounts")
+
+
 def test_validate_sql_case_insensitive():
     with pytest.raises(ValueError):
         _validate_sql("insert into accounts values (1)")
@@ -113,7 +120,9 @@ async def test_execute_run_sql():
     db.fetchall = AsyncMock(return_value=[{"id": 1, "name": "Alice"}])
     with patch("dashboard.ai_engine.AsyncOpenAI"):
         client = MaaSClient(api_key="k", base_url="u", model="m", db=db)
-    result = await client._execute_tool("run_sql", {"query": "SELECT * FROM accounts LIMIT 5"})
+    result = await client._execute_tool(
+        "run_sql", {"query": "SELECT * FROM accounts LIMIT 5"}
+    )
     parsed = json.loads(result)
     assert parsed["row_count"] == 1
 
@@ -140,12 +149,15 @@ async def test_execute_flag_transaction():
     db = _mock_db()
     with patch("dashboard.ai_engine.AsyncOpenAI"):
         client = MaaSClient(api_key="k", base_url="u", model="m", db=db)
-    result = await client._execute_tool("flag_transaction", {
-        "transaction_id": 42,
-        "alert_type": "velocity",
-        "confidence": 0.95,
-        "reasoning": "Rapid micro-transactions",
-    })
+    result = await client._execute_tool(
+        "flag_transaction",
+        {
+            "transaction_id": 42,
+            "alert_type": "velocity",
+            "confidence": 0.95,
+            "reasoning": "Rapid micro-transactions",
+        },
+    )
     parsed = json.loads(result)
     assert parsed["status"] == "flagged"
     assert parsed["transaction_id"] == 42
@@ -256,7 +268,9 @@ async def test_analyze_anomalies():
     with patch("dashboard.ai_engine.AsyncOpenAI") as MockOpenAI:
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(
-            return_value=_mock_openai_response("No anomalies detected in the last 30 minutes.")
+            return_value=_mock_openai_response(
+                "No anomalies detected in the last 30 minutes."
+            )
         )
         MockOpenAI.return_value = mock_client
         client = MaaSClient(api_key="k", base_url="u", model="m", db=db)

@@ -26,3 +26,6 @@ ansible/inventory.ini
 .vscode/
 *.swp
 credentials.txt
+
+# CodeGraph local index (machine-specific, rebuilt via `codegraph init -i`)
+.codegraph/

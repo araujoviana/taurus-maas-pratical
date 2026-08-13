@@ -64,12 +64,15 @@ class ScenarioManager:
         self.info.load_start = time.time()
         try:
             from scenarios.workload import run_workload
-            await asyncio.get_running_loop().run_in_executor(
+
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
                 None,
                 run_workload,
                 self._db,
                 self._env,
                 self._on_load_progress,
+                loop,
             )
         except Exception as exc:
             self.info.demo_state = DemoState.ERROR
@@ -93,6 +96,7 @@ class ScenarioManager:
         self.info.failover_start = time.time()
         try:
             from scenarios.failover import run_failover
+
             await asyncio.get_running_loop().run_in_executor(
                 None,
                 run_failover,
@@ -107,11 +111,14 @@ class ScenarioManager:
         self.info.message = "Monitoring recovery..."
         try:
             from scenarios.failover import wait_recovery
-            await asyncio.get_running_loop().run_in_executor(
+
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
                 None,
                 wait_recovery,
                 self._db,
                 self._env,
+                loop,
             )
         except Exception:
             pass
@@ -129,13 +136,16 @@ class ScenarioManager:
         self.info.ai_start = time.time()
         try:
             from scenarios.ai_analytics import run_ai_analysis
-            result = await asyncio.get_running_loop().run_in_executor(
+
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
                 None,
                 run_ai_analysis,
                 self._db,
                 self._maas_api_key,
                 self._maas_base_url,
                 self._maas_model,
+                loop,
             )
         except Exception as exc:
             self.info.demo_state = DemoState.ERROR

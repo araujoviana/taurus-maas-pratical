@@ -45,7 +45,7 @@ resource "huaweicloud_vpc_subnet" "taurus-demo-subnet" {
   name       = "taurus-demo-subnet"
   vpc_id     = huaweicloud_vpc.taurus-demo-vpc.id
   cidr       = var.subnet_cidr
-  gateway_ip = "10.0.X.1"
+  gateway_ip = "10.0.1.1"
   dns_list   = ["100.125.1.250", "100.125.21.250"]
 }
 

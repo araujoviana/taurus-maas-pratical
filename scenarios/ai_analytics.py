@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
 from openai import OpenAI
+
+
+def _ac(coro, loop):
+    return asyncio.run_coroutine_threadsafe(coro, loop).result()
 
 
 ANALYSIS_PROMPT = """You are a senior fraud analyst at a fintech company. Analyze the following transaction data and provide:
@@ -28,43 +33,35 @@ def run_ai_analysis(
     api_key: str,
     base_url: str,
     model: str,
+    loop: asyncio.AbstractEventLoop,
 ) -> dict[str, Any]:
-    import asyncio
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    flagged = loop.run_until_complete(
+    flagged = _ac(
         db.fetchall(
             "SELECT t.id, t.account_id, t.amount, t.tx_type, t.description, t.is_flagged, "
             "a.name, a.email, a.risk_score "
             "FROM transactions t JOIN accounts a ON t.account_id = a.id "
             "WHERE t.is_flagged = TRUE ORDER BY t.id DESC LIMIT 20",
             (),
-        )
+        ),
+        loop,
     )
 
-    sample = loop.run_until_complete(
+    sample = _ac(
         db.fetchall(
             "SELECT t.id, t.account_id, t.amount, t.tx_type, t.description, t.is_flagged, "
             "a.name, a.risk_score "
             "FROM transactions t JOIN accounts a ON t.account_id = a.id "
             "ORDER BY RAND() LIMIT 30",
             (),
-        )
+        ),
+        loop,
     )
 
-    total_accounts = loop.run_until_complete(
-        db.fetchone("SELECT COUNT(*) as c FROM accounts")
-    )
-    total_tx = loop.run_until_complete(
-        db.fetchone("SELECT COUNT(*) as c FROM transactions")
-    )
-    flagged_count = loop.run_until_complete(
-        db.fetchone("SELECT COUNT(*) as c FROM transactions WHERE is_flagged = TRUE")
+    total_accounts = _ac(db.fetchone("SELECT COUNT(*) as c FROM accounts"), loop)
+    total_tx = _ac(db.fetchone("SELECT COUNT(*) as c FROM transactions"), loop)
+    flagged_count = _ac(
+        db.fetchone("SELECT COUNT(*) as c FROM transactions WHERE is_flagged = TRUE"),
+        loop,
     )
 
     all_tx = flagged + sample
@@ -81,7 +78,10 @@ def run_ai_analysis(
     response = client.chat.completions.create(
         model=model,
         messages=[
-            {"role": "system", "content": "You are a fraud analysis AI for a fintech platform."},
+            {
+                "role": "system",
+                "content": "You are a fraud analysis AI for a fintech platform.",
+            },
             {"role": "user", "content": prompt},
         ],
         max_tokens=1500,
@@ -93,11 +93,12 @@ def run_ai_analysis(
     high_risk_ids = [r["id"] for r in flagged if r.get("risk_score", 0) >= 7]
     if high_risk_ids:
         placeholders = ",".join(["%s"] * len(high_risk_ids))
-        loop.run_until_complete(
+        _ac(
             db.execute(
                 f"UPDATE accounts SET risk_score = 10 WHERE id IN ({placeholders})",
                 tuple(high_risk_ids),
-            )
+            ),
+            loop,
         )
 
     return {

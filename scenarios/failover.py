@@ -11,8 +11,11 @@ API reference:
   https://support.huaweicloud.com/en-us/api-gaussdbformysql/gaussdbformysql_04_0088.html
 """
 
+import logging
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 2  # seconds between reconnection attempts
 MAX_WAIT = 120  # maximum seconds to wait for recovery
@@ -73,27 +76,22 @@ def run_failover(env: dict[str, str]) -> None:
         )
 
 
-def wait_recovery(db: Any, env: dict[str, str]) -> None:
+def wait_recovery(
+    db: Any, env: dict[str, str], loop: "asyncio.AbstractEventLoop"
+) -> None:
     """Poll the database until it responds (proxy should restore connectivity).
 
     Runs synchronously — call via run_in_executor from async code.
     """
     import asyncio
 
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
     start = time.time()
     while time.time() - start < MAX_WAIT:
         try:
-            loop.run_until_complete(db.fetchone("SELECT 1"))
+            asyncio.run_coroutine_threadsafe(db.fetchone("SELECT 1"), loop).result()
             return  # DB is back
-        except Exception:
+        except Exception as exc:
+            logger.warning("TaurusDB not yet reachable during recovery poll: %s", exc)
             time.sleep(POLL_INTERVAL)
 
-    raise TimeoutError(
-        f"TaurusDB did not recover within {MAX_WAIT}s after failover."
-    )
+    raise TimeoutError(f"TaurusDB did not recover within {MAX_WAIT}s after failover.")

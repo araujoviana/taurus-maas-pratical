@@ -1,8 +1,10 @@
-"""
-seed_data.py — Bulk-seeds the fintech demo database with accounts and transactions.
-Run once after `make up`.
+"""bulk_populate.py — Adds a large volume of additional accounts/transactions
+on top of whatever is already in the database (unlike seed_data.py, this does
+not skip if data already exists). Run manually when you want more volume than
+the standard demo seed.
 """
 
+import datetime
 import random
 from pathlib import Path
 
@@ -10,17 +12,13 @@ import pymysql
 from dotenv import dotenv_values
 from faker import Faker
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
-ACCOUNTS_COUNT = 10_000
-TRANSACTIONS_COUNT = 500_000
-BATCH_SIZE = 1000
+ADDITIONAL_ACCOUNTS = 40_000
+ADDITIONAL_TRANSACTIONS = 4_500_000
+BATCH_SIZE = 2000
 
-RISK_SCORE_WEIGHTS = [40, 25, 15, 8, 5, 3, 2, 1, 1, 0]  # index == risk_score
+RISK_SCORE_WEIGHTS = [40, 25, 15, 8, 5, 3, 2, 1, 1, 0]
 RISK_SCORES = list(range(10))
 
 TX_TYPES = ["credit", "debit", "transfer"]
@@ -40,7 +38,7 @@ DESCRIPTIONS = [
 
 
 def _get_config() -> dict:
-    env = {**dotenv_values(ENV_PATH), **{}}
+    env = dotenv_values(ENV_PATH)
     return {
         "host": env.get("TAURUS_HOST", "127.0.0.1"),
         "port": int(env.get("TAURUS_PORT", "3306")),
@@ -61,20 +59,12 @@ def _connect(cfg: dict) -> pymysql.Connection:
     )
 
 
-def _already_seeded(cursor) -> bool:
-    cursor.execute("SELECT COUNT(*) FROM accounts")
-    (count,) = cursor.fetchone()
-    return count > 0
-
-
-def _seed_accounts(cursor, faker: Faker) -> list[int]:
-    """Insert 10,000 accounts in batches of 1,000. Returns list of inserted IDs."""
+def _add_accounts(cursor, faker: Faker, count: int) -> None:
     sql = (
         "INSERT INTO accounts (name, email, balance, risk_score) "
         "VALUES (%s, %s, %s, %s)"
     )
-    total_batches = ACCOUNTS_COUNT // BATCH_SIZE
-    inserted_ids: list[int] = []
+    total_batches = count // BATCH_SIZE
 
     for batch_num in range(1, total_batches + 1):
         rows = []
@@ -86,36 +76,25 @@ def _seed_accounts(cursor, faker: Faker) -> list[int]:
             rows.append((name, email, balance, risk_score))
 
         cursor.executemany(sql, rows)
-        # Fetch the auto-increment IDs for this batch
-        first_id = cursor.lastrowid - BATCH_SIZE + 1
-        inserted_ids.extend(range(first_id, first_id + BATCH_SIZE))
 
         if batch_num % 10 == 0:
             print(
-                f"[accounts] batch {batch_num}/{total_batches} "
-                f"({batch_num * BATCH_SIZE:,} rows)"
+                f"[accounts] batch {batch_num}/{total_batches} ({batch_num * BATCH_SIZE:,} rows)"
             )
 
     cursor.connection.commit()
-    print(f"[accounts] done — {ACCOUNTS_COUNT:,} rows inserted.")
-
-    cursor.execute("SELECT id FROM accounts ORDER BY id")
-    inserted_ids = [row[0] for row in cursor.fetchall()]
-    return inserted_ids
+    print(f"[accounts] done — {count:,} additional rows inserted.")
 
 
-def _seed_transactions(cursor, account_ids: list[int], faker: Faker) -> None:
-    """Insert 500,000 transactions in batches of 1,000."""
-    import datetime
-
+def _add_transactions(cursor, account_ids: list[int], count: int) -> None:
     sql = (
         "INSERT INTO transactions "
         "(account_id, amount, tx_type, description, is_flagged, created_at) "
         "VALUES (%s, %s, %s, %s, %s, %s)"
     )
-    total_batches = TRANSACTIONS_COUNT // BATCH_SIZE
+    total_batches = count // BATCH_SIZE
     now = datetime.datetime.utcnow()
-    ninety_days = 90 * 24 * 3600  # seconds
+    ninety_days = 90 * 24 * 3600
 
     for batch_num in range(1, total_batches + 1):
         rows = []
@@ -133,19 +112,17 @@ def _seed_transactions(cursor, account_ids: list[int], faker: Faker) -> None:
 
         cursor.executemany(sql, rows)
 
-        if batch_num % 10 == 0:
+        if batch_num % 50 == 0:
             print(
-                f"[transactions] batch {batch_num}/{total_batches} "
-                f"({batch_num * BATCH_SIZE:,} rows)"
+                f"[transactions] batch {batch_num}/{total_batches} ({batch_num * BATCH_SIZE:,} rows)"
             )
+            cursor.connection.commit()
 
     cursor.connection.commit()
-    print(f"[transactions] done — {TRANSACTIONS_COUNT:,} rows inserted.")
+    print(f"[transactions] done — {count:,} additional rows inserted.")
 
 
 def main() -> None:
-    Faker.seed(1234)
-    random.seed(1234)
     faker = Faker()
 
     cfg = _get_config()
@@ -153,20 +130,31 @@ def main() -> None:
     conn = _connect(cfg)
     cursor = conn.cursor()
 
-    if _already_seeded(cursor):
-        print("Database already contains accounts — skipping seed.")
-        cursor.close()
-        conn.close()
-        return
+    cursor.execute("SELECT COUNT(*) FROM accounts")
+    (existing_accounts,) = cursor.fetchone()
+    cursor.execute("SELECT COUNT(*) FROM transactions")
+    (existing_transactions,) = cursor.fetchone()
+    print(
+        f"Existing: {existing_accounts:,} accounts, {existing_transactions:,} transactions"
+    )
 
-    print("Starting seed …")
+    _add_accounts(cursor, faker, ADDITIONAL_ACCOUNTS)
 
-    account_ids = _seed_accounts(cursor, faker)
-    _seed_transactions(cursor, account_ids, faker)
+    cursor.execute("SELECT id FROM accounts ORDER BY id")
+    account_ids = [row[0] for row in cursor.fetchall()]
+
+    _add_transactions(cursor, account_ids, ADDITIONAL_TRANSACTIONS)
+
+    cursor.execute("SELECT COUNT(*) FROM accounts")
+    (final_accounts,) = cursor.fetchone()
+    cursor.execute("SELECT COUNT(*) FROM transactions")
+    (final_transactions,) = cursor.fetchone()
 
     cursor.close()
     conn.close()
-    print("Seed complete.")
+    print(
+        f"Bulk populate complete. Totals: {final_accounts:,} accounts, {final_transactions:,} transactions."
+    )
 
 
 if __name__ == "__main__":

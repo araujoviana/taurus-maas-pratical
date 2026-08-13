@@ -8,7 +8,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import dotenv_values
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -68,12 +76,16 @@ async def lifespan(app: FastAPI):
     app.state.taurus_collector = TaurusDBCollector(db)
     app.state.maas_collector = MAASCollector(
         api_key=_ENV.get("MAAS_API_KEY", ""),
-        base_url=_ENV.get("MAAS_BASE_URL", "https://api-ap-southeast-1.modelarts-maas.com/openai/v1"),
+        base_url=_ENV.get(
+            "MAAS_BASE_URL", "https://api-ap-southeast-1.modelarts-maas.com/openai/v1"
+        ),
         model=_ENV.get("MAAS_MODEL", "glm-5.1"),
     )
     app.state.maas_client = MaaSClient(
         api_key=_ENV.get("MAAS_API_KEY", ""),
-        base_url=_ENV.get("MAAS_BASE_URL", "https://api-ap-southeast-1.modelarts-maas.com/openai/v1"),
+        base_url=_ENV.get(
+            "MAAS_BASE_URL", "https://api-ap-southeast-1.modelarts-maas.com/openai/v1"
+        ),
         model=_ENV.get("MAAS_MODEL", "glm-5.1"),
         db=db,
     )
@@ -87,7 +99,9 @@ async def lifespan(app: FastAPI):
     # JWT secret = DEMO_PASSWORD (non-trivial value, localhost-only uvicorn)
     app.state.jwt_secret = _ENV.get("DEMO_PASSWORD", "")
     if not app.state.jwt_secret:
-        raise RuntimeError("DEMO_PASSWORD must be set in .env — it is used as the JWT secret")
+        raise RuntimeError(
+            "DEMO_PASSWORD must be set in .env — it is used as the JWT secret"
+        )
 
     yield
 
@@ -109,6 +123,7 @@ if _static.is_dir():
 @app.get("/")
 async def root():
     from fastapi.responses import FileResponse
+
     index = _static / "index.html"
     if index.is_file():
         return FileResponse(str(index))
@@ -192,7 +207,9 @@ async def db_stats(request: Request):
         status = await db.status()
         count_accounts = await db.fetchone("SELECT COUNT(*) as c FROM accounts")
         count_tx = await db.fetchone("SELECT COUNT(*) as c FROM transactions")
-        flagged = await db.fetchone("SELECT COUNT(*) as c FROM transactions WHERE is_flagged = TRUE")
+        flagged = await db.fetchone(
+            "SELECT COUNT(*) as c FROM transactions WHERE is_flagged = TRUE"
+        )
         return {
             **status,
             "total_accounts": count_accounts["c"] if count_accounts else 0,
@@ -240,7 +257,9 @@ class ChatRequest(BaseModel):
 
 
 @app.post("/ai/chat")
-async def ai_chat(request: Request, body: ChatRequest, _: dict = Depends(_require_auth)):
+async def ai_chat(
+    request: Request, body: ChatRequest, _: dict = Depends(_require_auth)
+):
     client: MaaSClient = request.app.state.maas_client
     result = await client.chat(body.message, body.history)
     return result
@@ -261,7 +280,13 @@ async def get_commentary(request: Request):
             "scenario_state": sm.info.state.value,
         }
     except Exception:
-        metrics_snapshot = {"qps": 0, "latency_ms": 0, "connections": 0, "slow_queries": 0, "scenario_state": "idle"}
+        metrics_snapshot = {
+            "qps": 0,
+            "latency_ms": 0,
+            "connections": 0,
+            "slow_queries": 0,
+            "scenario_state": "idle",
+        }
     text = await client.get_commentary(metrics_snapshot)
     return {"text": text, "ts": time.time()}
 
@@ -274,15 +299,20 @@ async def get_report(request: Request, _: dict = Depends(_require_auth)):
 
 
 @app.post("/fraud/inject/{pattern}")
-async def inject_fraud(request: Request, pattern: str, _: dict = Depends(_require_auth)):
+async def inject_fraud(
+    request: Request, pattern: str, _: dict = Depends(_require_auth)
+):
     from scenarios.fraud_injection import PATTERNS
+
     if pattern not in PATTERNS:
-        raise HTTPException(status_code=400, detail=f"Unknown pattern: {pattern}. Use: velocity, large_transfer, geo_anomaly")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown pattern: {pattern}. Use: velocity, large_transfer, geo_anomaly",
+        )
     inject_fn, description = PATTERNS[pattern]
     db: TaurusDB = request.app.state.db
-    result = await asyncio.get_running_loop().run_in_executor(
-        None, inject_fn, db, _ENV
-    )
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, inject_fn, db, _ENV, loop)
     return result
 
 
@@ -359,7 +389,9 @@ async def ws_endpoint(ws: WebSocket, token: str | None = None):
                     "message": sm.info.message,
                     "progress": sm.info.progress,
                 },
-                "commentary": getattr(ws.app.state, "maas_client", None) and ws.app.state.maas_client._cached_commentary or "",
+                "commentary": getattr(ws.app.state, "maas_client", None)
+                and ws.app.state.maas_client._cached_commentary
+                or "",
                 "ts": time.time(),
             }
             await ws.send_json(payload)

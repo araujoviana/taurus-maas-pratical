@@ -241,7 +241,7 @@ async function loadFraudAlerts() {
           <div class="alert-body">
             Account #${a.account_id || '?'} &middot; Txn #${a.transaction_id || '?'}
           </div>
-          ${a.reasoning ? `<div class="alert-reason">${a.reasoning}</div>` : ''}
+          ${a.reasoning ? `<div class="alert-reason">${escapeHtml(a.reasoning)}</div>` : ''}
           <div class="alert-time">${timeAgo}</div>
         </div>
       `;
@@ -361,14 +361,14 @@ function renderTable(chart) {
   if (!chart.series || !chart.series.length) return '';
   const headers = chart.categories || [];
   let html = '<div class="table-wrap"><table><thead><tr>';
-  headers.forEach(h => html += `<th>${h}</th>`);
+  headers.forEach(h => html += `<th>${escapeHtml(String(h))}</th>`);
   html += '</tr></thead><tbody>';
   chart.series[0].data.forEach((row, i) => {
     html += '<tr>';
     if (Array.isArray(row)) {
-      row.forEach(cell => html += `<td>${cell}</td>`);
+      row.forEach(cell => html += `<td>${escapeHtml(String(cell))}</td>`);
     } else {
-      html += `<td>${headers[i] || ''}</td><td>${row}</td>`;
+      html += `<td>${escapeHtml(String(headers[i] || ''))}</td><td>${escapeHtml(String(row))}</td>`;
     }
     html += '</tr>';
   });

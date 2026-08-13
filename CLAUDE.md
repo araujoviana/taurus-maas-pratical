@@ -42,6 +42,11 @@ make down
 
 `make up` runs three steps: `terraform apply`, then `scripts/gen_inventory.py` (bridges TF outputs → `ansible/inventory.ini` + `.env`), then `ansible-playbook`.
 
+## Development tooling
+
+- **Formatting**: `black` (dev dependency, run via `uv run black .`). A `PostToolUse` hook (`.claude/settings.json` → `.claude/hooks/format_python.py`) auto-formats any `.py` file after Claude Code edits or writes it, via `uv run black --quiet <file>`. Target version is pinned to `py311` in `pyproject.toml` under `[tool.black]`.
+- **Secret scanning**: real git hooks (not Claude-Code-specific — they fire on any `git commit`/`git push`, from any tool) live in `.githooks/` (`pre-commit`, `pre-push`, shared logic in `check_secrets.py`) and block commits/pushes containing credential-shaped filenames or content (private keys, AWS-style access keys, hardcoded passwords/tokens/URLs-with-embedded-creds). Not active by default per clone — run `make hooks` once to point `core.hooksPath` at `.githooks/` (already done in this working copy). This is defense-in-depth on top of `.gitignore`. False positives: adjust `PLACEHOLDER_MARKERS`/patterns in `.githooks/check_secrets.py`, or bypass a single commit/push with `--no-verify`.
+
 ## Repository structure
 
 ```
@@ -50,24 +55,27 @@ Makefile                        # make up / make down / make seed / make logs
 pyproject.toml                  # uv-managed deps
 
 dashboard/
-  main.py                       # FastAPI app — WebSocket /ws + scenario + auth routes
+  main.py                       # FastAPI app — WebSocket /ws + scenario + auth + AI + fraud routes
   collectors.py                 # TaurusDBCollector + MAASCollector → metrics dataclasses
   scenarios.py                  # ScenarioManager state machine (IDLE/LOADING/FAILING_OVER/…)
   database.py                   # TaurusDB aiomysql pool + schema init + helper methods
   auth.py                       # JWT creation/verification (HS256, 8h TTL)
+  ai_engine.py                  # MaaSClient — tool-calling chat agent, reports, live commentary (see Architecture)
   static/
     index.html                  # Dark fintech dashboard (ApexCharts)
-    app.js                      # WebSocket client + chart updates + scenario buttons
+    app.js                      # WebSocket client + chart updates + scenario buttons + chat UI
     style.css                   # Dark enterprise theme (#0f1117 background)
 
 scenarios/
   workload.py                   # Faker-based bulk insert: 200 accounts, 10k transactions
   failover.py                   # Huawei Cloud GaussDB MySQL switchover REST API + recovery poll
-  ai_analytics.py               # GLM-5.1 fraud pattern analysis
+  ai_analytics.py               # GLM-5.1 fraud pattern analysis (Act 3, one-shot via ScenarioManager)
+  fraud_injection.py            # Synthetic fraud pattern injection (velocity/large_transfer/geo_anomaly)
 
 scripts/
   gen_inventory.py              # terraform output -json → inventory.ini + .env patch
   seed_data.py                  # Full seed: 10k accounts + 500k transactions (CLI)
+  bulk_populate.py              # Manual: adds 40k accounts + 4.5M transactions on top of existing data (not wired into make/ansible)
 
 terraform/
   main.tf                       # VPC, ECS, EIP, TaurusDB HA instance + proxy
@@ -86,6 +94,7 @@ tests/
   test_collectors.py            # TaurusDBCollector (QPS rate, error handling) + MAASCollector (cache)
   test_scenarios.py             # ScenarioManager state machine
   test_auth.py                  # JWT create + verify
+  test_ai_engine.py             # MaaSClient — SQL validation, tool execution, chat/report/commentary
 ```
 
 ## Architecture
@@ -112,7 +121,17 @@ The browser POSTs to `/scenario/start-load`, `/scenario/kill-primary`, `/scenari
 
 ### AI fraud analysis (Act 3)
 
-`scenarios/ai_analytics.py` pulls the 20 most recent flagged transactions + 30 random samples, builds a structured prompt, and calls GLM-5.1 via `openai.OpenAI(base_url=MAAS_BASE_URL, api_key=MAAS_API_KEY)`. Returns analysis text + token usage. High-risk accounts (risk_score ≥ 7) are escalated to risk_score=10 in the database.
+`scenarios/ai_analytics.py` pulls the 20 most recent flagged transactions + 30 random samples, builds a structured prompt, and calls GLM-5.1 via `openai.OpenAI(base_url=MAAS_BASE_URL, api_key=MAAS_API_KEY)`. Returns analysis text + token usage. High-risk accounts (risk_score ≥ 7) are escalated to risk_score=10 in the database. This is a one-shot call, driven through `ScenarioManager.ai_analyze()` via `run_in_executor` (sync `OpenAI` client).
+
+### AI analyst chat & tool-calling engine (`dashboard/ai_engine.py`)
+
+Separate from Act 3, `MaaSClient` (in `dashboard/ai_engine.py`) is a standing tool-calling agent backing the dashboard's chat panel, executive report, live commentary ticker, and interactive fraud detection. It uses `openai.AsyncOpenAI` directly (no executor hop) and drives a bounded tool loop (`_run_tool_loop`, max 5 iterations) with four tools: `run_sql` (read-only, validated by `_validate_sql`), `get_db_metrics`, `flag_transaction` (writes to `fraud_alerts`), and `get_account_details`.
+
+Routes: `POST /ai/chat` (conversational SQL Q&A with chart generation), `GET /ai/report` (executive report from six canned aggregate queries), `GET /ai/commentary` (25s-cached one-liner for the ticker, also folded into the `/ws` payload), `POST /fraud/analyze` (runs `analyze_anomalies` — same tool loop, prompted to hunt for and flag fraud over the last 30 minutes).
+
+`POST /fraud/inject/{pattern}` (routes to `scenarios/fraud_injection.py`) is a separate, non-AI path that synthesizes obviously-fraudulent transactions (`velocity`, `large_transfer`, `geo_anomaly`) plus a matching `fraud_alerts` row, so `Run AI Detection` has something realistic to find.
+
+`_validate_sql` only allows queries starting with `SELECT` and appends `LIMIT 200` if absent — this is the sole guard on LLM-generated SQL reaching the database.
 
 ## Environment variables
 
@@ -200,11 +219,11 @@ This section documents the running ECS deployment so any AI session can manage i
 - **App dir**: `/opt/taurus-demo/`
 - **Python**: 3.14 (via uv)
 - **uv**: `/root/.local/bin/uv` (add to PATH: `export PATH="/root/.local/bin:$PATH"`)
-- **App server**: uvicorn on `127.0.0.1:8000` (started via `nohup uv run python main.py`)
+- **App server**: uvicorn on `127.0.0.1:8000`, managed by the `taurus-demo` systemd service
 - **nginx**: reverse proxy `80→8000`, WebSocket at `/ws`, static files at `/static/`
 - **nginx config**: `/etc/nginx/sites-available/taurus-demo`
 - **Auth**: JWT only (login overlay on page load, `sessionStorage` token). nginx basic auth was **removed**.
-- **App log**: `/tmp/app.log`
+- **App log**: via `journalctl -u taurus-demo`
 - **Seed log**: `/tmp/seed.log`
 
 ### Common Operations (run on ECS via SSH)
@@ -214,19 +233,19 @@ This section documents the running ECS deployment so any AI session can manage i
 ssh root@YOUR_ECS_PUBLIC_IP
 
 # Check if app is running
-ss -tlnp | grep 8000
+systemctl status taurus-demo
 
 # Start the app
-cd /opt/taurus-demo && PATH="/root/.local/bin:$PATH" nohup uv run python main.py > /tmp/app.log 2>&1 &
+systemctl start taurus-demo
 
 # Stop the app
-pkill -f "python.*main.py"
+systemctl stop taurus-demo
 
 # Restart the app
-pkill -f "python.*main.py"; sleep 2; cd /opt/taurus-demo && PATH="/root/.local/bin:$PATH" nohup uv run python main.py > /tmp/app.log 2>&1 &
+systemctl restart taurus-demo
 
 # Check app logs
-tail -f /tmp/app.log
+journalctl -u taurus-demo -f --no-pager
 
 # Re-seed the database (full: 10k accounts + 500k transactions)
 cd /opt/taurus-demo && PATH="/root/.local/bin:$PATH" uv run python scripts/seed_data.py
@@ -257,17 +276,16 @@ cp /tmp/upload/index.html /opt/taurus-demo/dashboard/static/
 cp /tmp/upload/style.css /opt/taurus-demo/dashboard/static/
 cp /tmp/upload/workload.py /opt/taurus-demo/scenarios/
 cp /tmp/upload/fraud_injection.py /opt/taurus-demo/scenarios/
-pkill -f "python.*main.py"; sleep 2
-cd /opt/taurus-demo && PATH="/root/.local/bin:$PATH" nohup uv run python main.py > /tmp/app.log 2>&1 &
+systemctl restart taurus-demo
 ```
 
 ### Known Issues / Design Decisions
 
-- **No systemd service**: App runs via `nohup`. For persistence across reboots, create a systemd unit (template at `ansible/templates/taurus-demo.service.j2`).
 - **Terraform state drift**: The ECS was recreated manually (v2), so terraform state doesn't track the current ECS. Run `terraform apply` carefully — it may try to recreate resources.
 - **University WiFi proxy**: The presenter's university WiFi blocks non-standard ports. SSH/HTTP work from other networks. The dashboard is accessible at `http://YOUR_ECS_PUBLIC_IP`.
 - **Chrome basic auth**: Removed nginx basic auth to avoid Chrome's auth popup issues. Auth is now JWT-only via the app's login overlay.
-- **asyncio loop bug**: `run_in_executor` tasks that call async DB methods must use `asyncio.run_coroutine_threadsafe()` — NOT `loop.run_until_complete()`. This was the cause of the "attached to a different loop" error in Act 1.
+- **asyncio loop bug**: `run_in_executor` tasks that call async DB methods must use `asyncio.run_coroutine_threadsafe()` — NOT `loop.run_until_complete()`. This was the cause of the "attached to a different loop" error in Act 1. All current `scenarios/*.py` executor entry points (`workload.py`, `failover.py`, `ai_analytics.py`, `fraud_injection.py`) use the `_ac()`/`run_coroutine_threadsafe` pattern correctly.
+- **Systemd is the process supervisor**: `ansible/site.yml` installs and enables `taurus-demo.service` (see "Common Operations" above) via `taurus-demo.service.j2`. The unit runs uvicorn with a single worker (no `--workers`) deliberately — the app keeps scenario/metrics state in process memory (`ScenarioManager.info`, QPS delta counters, the MaaS commentary cache), so multiple workers would split that state across processes and cause the dashboard to silently stop reflecting scenario progress.
 
 ## TaurusDB features demonstrated
 

@@ -13,7 +13,6 @@ from dashboard.collectors import (
     MAASMetrics,
 )
 
-
 # ---------------------------------------------------------------------------
 # TaurusDBCollector tests
 # ---------------------------------------------------------------------------
@@ -30,7 +29,11 @@ async def _make_taurus_db(status_data: dict, fetchone_return=None, raise_exc=Non
 
 
 async def test_taurus_collector_success():
-    status_data = {"threads_connected": 5, "queries_per_second": 1000, "slow_queries": 2}
+    status_data = {
+        "threads_connected": 5,
+        "queries_per_second": 1000,
+        "slow_queries": 2,
+    }
     db = await _make_taurus_db(status_data)
     collector = TaurusDBCollector(db)
 
@@ -45,9 +48,17 @@ async def test_taurus_collector_success():
 
 async def test_taurus_collector_qps_rate():
     # First call: 1000 cumulative queries
-    status_first = {"threads_connected": 3, "queries_per_second": 1000, "slow_queries": 0}
+    status_first = {
+        "threads_connected": 3,
+        "queries_per_second": 1000,
+        "slow_queries": 0,
+    }
     # Second call: 1060 cumulative queries — 60 more over ~1 second → QPS ~60
-    status_second = {"threads_connected": 3, "queries_per_second": 1060, "slow_queries": 0}
+    status_second = {
+        "threads_connected": 3,
+        "queries_per_second": 1060,
+        "slow_queries": 0,
+    }
 
     db = MagicMock()
     db.fetchone = AsyncMock(return_value={"1": 1})

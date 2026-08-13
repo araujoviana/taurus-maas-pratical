@@ -11,7 +11,6 @@ from dashboard.scenarios import (
     ScenarioState,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -50,12 +49,17 @@ async def test_start_load_calls_workload():
 
     mock_run_workload = MagicMock(return_value=None)
 
-    with patch.dict("sys.modules", {"scenarios.workload": MagicMock(run_workload=mock_run_workload)}):
+    with patch.dict(
+        "sys.modules", {"scenarios.workload": MagicMock(run_workload=mock_run_workload)}
+    ):
         with patch("scenarios.workload.run_workload", mock_run_workload, create=True):
             # Patch via the import path used inside start_load
-            with patch("dashboard.scenarios.ScenarioManager.start_load", wraps=sm.start_load):
+            with patch(
+                "dashboard.scenarios.ScenarioManager.start_load", wraps=sm.start_load
+            ):
                 # We need to intercept the dynamic import inside start_load
                 import sys
+
                 fake_workload_module = MagicMock()
                 fake_workload_module.run_workload = mock_run_workload
                 sys.modules["scenarios.workload"] = fake_workload_module

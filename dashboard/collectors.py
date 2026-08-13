@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from openai import OpenAI
+
+logger = logging.getLogger(__name__)
 
 # How often (seconds) to actually ping the MaaS API for a health check.
 # Pinging on every 1 s WebSocket tick would be expensive and slow.
@@ -111,7 +114,8 @@ class MAASCollector:
                 available=True,
                 model=self._model,
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning("MaaS health check failed: %s", exc)
             self._cached = MAASMetrics(available=False, errors=1, model=self._model)
 
         self._last_check = now

@@ -72,7 +72,10 @@ def patch_env(outputs: dict) -> None:
 def write_inventory(outputs: dict) -> None:
     runner_ip = outputs.get("demo_runner_public_ip", {}).get("value", "")
     if not runner_ip:
-        print("demo_runner_ip not in terraform outputs, skipping inventory", file=sys.stderr)
+        print(
+            "demo_runner_ip not in terraform outputs, skipping inventory",
+            file=sys.stderr,
+        )
         return
 
     INVENTORY_FILE.parent.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from typing import Any
@@ -8,6 +9,8 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from dashboard.database import TaurusDB
+
+logger = logging.getLogger(__name__)
 
 _MAX_TOOL_ITERATIONS = 5
 _FORBIDDEN_KEYWORDS = re.compile(
@@ -100,14 +103,23 @@ TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "transaction_id": {"type": "integer", "description": "The transaction ID to flag"},
+                    "transaction_id": {
+                        "type": "integer",
+                        "description": "The transaction ID to flag",
+                    },
                     "alert_type": {
                         "type": "string",
                         "enum": ["velocity", "amount_spike", "geo_anomaly", "pattern"],
                         "description": "Type of fraud alert",
                     },
-                    "confidence": {"type": "number", "description": "Confidence score 0.0-1.0"},
-                    "reasoning": {"type": "string", "description": "Why this transaction is flagged"},
+                    "confidence": {
+                        "type": "number",
+                        "description": "Confidence score 0.0-1.0",
+                    },
+                    "reasoning": {
+                        "type": "string",
+                        "description": "Why this transaction is flagged",
+                    },
                 },
                 "required": ["transaction_id", "alert_type", "confidence", "reasoning"],
             },
@@ -121,7 +133,10 @@ TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "account_id": {"type": "integer", "description": "The account ID to look up"}
+                    "account_id": {
+                        "type": "integer",
+                        "description": "The account ID to look up",
+                    }
                 },
                 "required": ["account_id"],
             },
@@ -134,7 +149,7 @@ def _validate_sql(query: str) -> str:
     stripped = query.strip()
     if not stripped.upper().startswith("SELECT"):
         raise ValueError("Only SELECT queries are allowed")
-    if _FORBIDDEN_KEYWORDS.search(stripped) and not stripped.upper().startswith("SELECT"):
+    if _FORBIDDEN_KEYWORDS.search(stripped):
         raise ValueError("Query contains forbidden keywords")
     if "LIMIT" not in stripped.upper():
         stripped = stripped.rstrip(";") + " LIMIT 200"
@@ -154,7 +169,9 @@ class MaaSClient:
             try:
                 safe_query = _validate_sql(args["query"])
                 rows = await self._db.fetchall(safe_query)
-                return json.dumps({"row_count": len(rows), "data": rows[:200]}, default=str)
+                return json.dumps(
+                    {"row_count": len(rows), "data": rows[:200]}, default=str
+                )
             except ValueError as e:
                 return json.dumps({"error": str(e)})
             except Exception as e:
@@ -179,9 +196,17 @@ class MaaSClient:
                 await self._db.execute(
                     "INSERT INTO fraud_alerts (transaction_id, account_id, alert_type, confidence, reasoning) "
                     "VALUES (%s, %s, %s, %s, %s)",
-                    (args["transaction_id"], account_id, args["alert_type"], args["confidence"], args["reasoning"]),
+                    (
+                        args["transaction_id"],
+                        account_id,
+                        args["alert_type"],
+                        args["confidence"],
+                        args["reasoning"],
+                    ),
                 )
-                return json.dumps({"status": "flagged", "transaction_id": args["transaction_id"]})
+                return json.dumps(
+                    {"status": "flagged", "transaction_id": args["transaction_id"]}
+                )
             except Exception as e:
                 return json.dumps({"error": str(e)})
 
@@ -194,7 +219,9 @@ class MaaSClient:
                     "SELECT * FROM transactions WHERE account_id = %s ORDER BY created_at DESC LIMIT 20",
                     (args["account_id"],),
                 )
-                return json.dumps({"account": account, "recent_transactions": txns}, default=str)
+                return json.dumps(
+                    {"account": account, "recent_transactions": txns}, default=str
+                )
             except Exception as e:
                 return json.dumps({"error": str(e)})
 
@@ -212,20 +239,29 @@ class MaaSClient:
                 temperature=0.3,
             )
             choice = response.choices[0]
-            assistant_msg = {"role": "assistant", "content": choice.message.content or ""}
+            assistant_msg = {
+                "role": "assistant",
+                "content": choice.message.content or "",
+            }
             if choice.message.tool_calls:
                 assistant_msg["tool_calls"] = [
                     {
                         "id": tc.id,
                         "type": "function",
-                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
                     }
                     for tc in choice.message.tool_calls
                 ]
             messages.append(assistant_msg)
 
             if not choice.message.tool_calls:
-                return {"content": choice.message.content or "", "tool_calls_made": tool_calls_made}
+                return {
+                    "content": choice.message.content or "",
+                    "tool_calls_made": tool_calls_made,
+                }
 
             for tc in choice.message.tool_calls:
                 tool_calls_made.append(tc.function.name)
@@ -235,7 +271,10 @@ class MaaSClient:
                     {"role": "tool", "tool_call_id": tc.id, "content": result}
                 )
 
-        return {"content": messages[-1].get("content", ""), "tool_calls_made": tool_calls_made}
+        return {
+            "content": messages[-1].get("content", ""),
+            "tool_calls_made": tool_calls_made,
+        }
 
     def _extract_chart(self, text: str) -> dict | None:
         marker = "CHART_JSON:"
@@ -314,7 +353,9 @@ class MaaSClient:
             alerts = []
 
         return {
-            "alerts_created": len([t for t in result["tool_calls_made"] if t == "flag_transaction"]),
+            "alerts_created": len(
+                [t for t in result["tool_calls_made"] if t == "flag_transaction"]
+            ),
             "summary": result["content"],
             "alerts": alerts,
         }
@@ -353,12 +394,28 @@ class MaaSClient:
         narrative = response.choices[0].message.content or ""
 
         sections = []
-        for heading in ["Executive Summary", "Risk Assessment", "Top Opportunities", "Recommendations"]:
+        for heading in [
+            "Executive Summary",
+            "Risk Assessment",
+            "Top Opportunities",
+            "Recommendations",
+        ]:
             idx = narrative.find(heading)
             if idx != -1:
-                next_headings = [narrative.find(h, idx + 1) for h in ["Executive Summary", "Risk Assessment", "Top Opportunities", "Recommendations"] if narrative.find(h, idx + 1) > idx]
+                next_headings = [
+                    narrative.find(h, idx + 1)
+                    for h in [
+                        "Executive Summary",
+                        "Risk Assessment",
+                        "Top Opportunities",
+                        "Recommendations",
+                    ]
+                    if narrative.find(h, idx + 1) > idx
+                ]
                 end = min(next_headings) if next_headings else len(narrative)
-                content = narrative[idx + len(heading):end].strip().lstrip(":").strip()
+                content = (
+                    narrative[idx + len(heading) : end].strip().lstrip(":").strip()
+                )
                 sections.append({"title": heading, "content": content})
 
         if not sections:
@@ -393,7 +450,7 @@ class MaaSClient:
                 temperature=0.7,
             )
             self._cached_commentary = response.choices[0].message.content or ""
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("MaaS commentary generation failed: %s", exc)
         self._commentary_ts = now
         return self._cached_commentary

@@ -58,6 +58,7 @@ FastAPI app (port 8000)
 git clone https://github.com/araujoviana/taurus-maas-pratical.git
 cd taurus-maas-pratical
 uv sync
+make hooks   # enable pre-commit/pre-push secret-scanning (see Security Notes)
 ```
 
 ### 2. Configure credentials
@@ -208,3 +209,4 @@ tests/
 - **Never commit `.env` or `terraform/terraform.tfvars`** — both are gitignored.
 - `DEMO_PASSWORD` is used as the TaurusDB password, the nginx admin password, and the JWT secret seed. Use a strong value in production.
 - The ECS root password auth is convenient for demos; for real deployments use SSH key auth and disable password login.
+- **Secret-scanning git hooks**: run `make hooks` once per clone to enable `pre-commit`/`pre-push` hooks (in `.githooks/`) that block commits/pushes containing credential-shaped filenames (`.env`, `*.pem`, `id_rsa`, `terraform.tfvars`, …) or content (private keys, AWS-style access keys, hardcoded passwords/tokens). This is defense-in-depth on top of `.gitignore` — it also catches force-added (`git add -f`) files.
