@@ -1,3 +1,5 @@
+> 📦 **Archived (November 2026).** A scripted FinTech demo for Huawei Cloud TaurusDB + MaaS AI: a bulk workload, HA failover and AI fraud analysis behind a FastAPI dashboard (mid 2026). Kept as a read-only record of what I was working on at the time; it is no longer maintained.
+
 # TaurusDB + MaaS AI — Fintech Demo
 
 FastAPI + WebSocket dashboard driving a scripted ~20-min demo: bulk workload → HA failover → AI fraud analysis, against a real TaurusDB (GaussDB for MySQL) HA instance and GLM-5.1 via MaaS AI.
